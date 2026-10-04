@@ -28,6 +28,30 @@
       "created_at": "2026-09-27T04:00:50.733Z",
       "sender": "macOS",
       "is_cancelled": false
+    },
+    {
+      "id": "af03e648-d463-4beb-8561-e94f147b8ac8",
+      "role": "user",
+      "content": "How much can you give output",
+      "status": "pending",
+      "model": "gemini-3.8-flash-high",
+      "client_type": "gemini-bridge",
+      "parent_message_id": null,
+      "created_at": "2026-10-04T16:02:01.805Z",
+      "sender": "ios",
+      "is_cancelled": false
+    },
+    {
+      "id": "20383da0-a4f9-4cc2-a89c-e075f8a1f1de",
+      "role": "agent",
+      "content": "I can generate substantial output depending on what you need:\n\n* **In a single chat response:** Typically up to **~8,192 tokens** (around 6,000 words or several hundred lines of code) in one turn.\n* **In files and codebases:** There is **no practical limit**. Using file-writing tools and scripts, I can generate entire modules, multiple files, and full applications iteratively without being constrained by single-message limits.\n* **Input / Context window:** I can analyze and remember up to **1 million+ tokens** of context, allowing me to review large codebases, long documentation, or extensive transcripts at once.\n\nIf you have a large project, dataset, document, or codebase to write, let me know what you'd like to build and we can break it down or generate it directly!",
+      "status": "completed",
+      "model": "gemini-3.8-flash-high",
+      "client_type": "gemini-bridge",
+      "parent_message_id": "af03e648-d463-4beb-8561-e94f147b8ac8",
+      "created_at": "2026-10-04T16:02:13.837Z",
+      "sender": "macOS",
+      "is_cancelled": false
     }
   ]
 }
