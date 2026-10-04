@@ -57,13 +57,13 @@
       "id": "b802f02d-2d94-49da-b986-c9a0773b1bf8",
       "role": "user",
       "content": "Can you do a research on  /deep research on how ai work from its setting age mode to newer days and how its lode on gpu how it predict next word right what are parameter why they are Important and what are moe and other structure of ai  make it inside file so you can write much longer practically use git hub repository",
-      "status": "pending",
+      "status": "cancelled",
       "model": "gemini-3.8-flash-high",
       "client_type": "gemini-bridge",
       "parent_message_id": null,
       "created_at": "2026-10-04T16:05:22.481Z",
       "sender": "ios",
-      "is_cancelled": false
+      "is_cancelled": true
     }
   ]
 }
