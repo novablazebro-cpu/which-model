@@ -71,6 +71,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--protocol", choices=("on", "off"), default="on", help="off = bare mode (A/B baseline)")
         p.add_argument("--label", default=None, help="model label recorded in the ledger")
     sub.add_parser("tasks", help="list tasks")
+    ev = sub.add_parser("eval", help="evaluation utilities")
+    ev.add_argument("what", choices=("report",))
+    ev.add_argument("--home", default=None)
 
     args = parser.parse_args(argv)
     if args.command == "serve":
@@ -80,6 +83,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "call":
         return _call(args)
+    if args.command == "eval":
+        from axiom3d.eval.report import collect, render_report
+
+        print(render_report(collect(_home(args.home))))
+        return 0
     for task in TASKS.values():
         print(f"{task.id:16} {task.goal}")
     return 0

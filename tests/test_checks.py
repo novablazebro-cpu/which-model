@@ -156,3 +156,9 @@ def test_step_direction_catches_naive_backswing(skel):
     assert res and "BACKWARD relative to the pelvis" in res[0].message
     # lift-off is at frame 8 (ankle 0.42 m behind the pelvis); mid-swing it reaches 0.57 m behind
     assert res[0].evidence["backswing"] > 0.1
+
+
+def test_negative_hip_flexion_hint_names_the_backward_leg(skel):
+    cmds = [{"op": "set_pose", "frame": 12, "angles": {"left_hip.flexion": -30}}]
+    res = [r for r in run_checks(ctx_for(skel, "step_forward", cmds)) if r.id == "anatomy.joint_limits"]
+    assert res and "BACKWARD" in res[0].hint and "positive" in res[0].hint
