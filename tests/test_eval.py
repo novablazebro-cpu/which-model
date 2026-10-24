@@ -62,3 +62,11 @@ def test_report_skips_unreadable_files(home):
     (home / "sessions" / "junk.json").write_text("{bad")
     assert len(collect(home)) == 1
     assert json.loads(json.dumps(collect(home)))  # rows are plain data
+
+
+def test_mirrored_naive_caught(home):
+    # Spec: the naive agent's "mirrored signs" must be caught (review I4).
+    from axiom3d.eval.agents import mirrored_script
+    sid, transcript = run_script(mirrored_script("step_forward"), home, protocol=True, label="mirrored")
+    assert load(sid, home).ledger["certified"] is False
+    assert "gait.laterality" in transcript[-1]

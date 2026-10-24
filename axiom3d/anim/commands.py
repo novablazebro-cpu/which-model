@@ -120,8 +120,10 @@ def _swing(clip: Clip, cmd: dict) -> None:
     if not MIN_APEX <= apex <= 0.3:
         raise CommandError(f"apex must be within {MIN_APEX}..0.3 m (a swing lifts the foot), got {apex}")
     for s in clip.swings:
-        if s.side == side and _overlaps(start, end, s.start, s.end, touching=False):
-            raise CommandError(f"{side} swing {start}..{end} would overlap the {side} swing {s.start}..{s.end}")
+        # Swings can't share an endpoint: the foot must land (a plant) between two swings.
+        if s.side == side and _overlaps(start, end, s.start, s.end, touching=True):
+            raise CommandError(f"{side} swing {start}..{end} would overlap the {side} swing {s.start}..{s.end}; "
+                               "plant the foot between two swings")
     for p in clip.plants:
         if p.side == side and _overlaps(start, end, p.start, p.end, touching=False):
             raise CommandError(f"{side} swing {start}..{end} would overlap the {side} plant {p.start}..{p.end}")

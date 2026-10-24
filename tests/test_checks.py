@@ -183,3 +183,29 @@ def test_dragging_swing_is_rejected(skel):
     from axiom3d.anim.commands import CommandError
     with pytest.raises(CommandError, match="apex"):
         ctx_for(skel, "step_forward", [{"op": "swing_foot", "side": "left", "start": 6, "end": 18, "apex": 0.01}])
+
+
+def _mirrored(tid):
+    out = []
+    for c in reference_commands(tid):
+        c = dict(c)
+        if c["op"] == "plant_foot":
+            c["left"] = 0.0875 if c["side"] == "right" else -0.0875
+        if c["op"] == "set_root" and "height" in c:
+            c["height"] -= 0.02
+        out.append(c)
+    return out
+
+
+@pytest.mark.parametrize("tid", ["step_forward", "walk_forward"])
+def test_laterality_catches_mirrored_feet(skel, tid):
+    # Review I4: left/right swapped (crossed legs) used to pass every check.
+    res = [r for r in run_checks(ctx_for(skel, tid, _mirrored(tid))) if r.id == "gait.laterality"]
+    assert res and res[0].severity == "error" and "+X" in res[0].hint
+
+
+def test_chained_swings_rejected(skel):
+    # Review M4: two swings sharing an endpoint made the foot teleport back to the old plant.
+    from axiom3d.anim.commands import CommandError
+    with pytest.raises(CommandError, match="overlap"):
+        ctx_for(skel, "walk_forward", [swing("left", 3, 9), swing("left", 9, 15)])

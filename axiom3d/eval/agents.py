@@ -39,10 +39,27 @@ def _honest_expect(skel, clip, cmd: dict) -> list[str]:
 
 
 def correct_script(task_id: str) -> list[Step]:
+    return _honest_script(task_id, reference_commands(task_id))
+
+
+def mirrored_script(task_id: str) -> list[Step]:
+    """Computes honestly but has left and right swapped: the left foot is planted at -X."""
+    cmds = []
+    for cmd in reference_commands(task_id):
+        cmd = dict(cmd)
+        if cmd["op"] == "plant_foot":
+            cmd["left"] = 0.0875 if cmd["side"] == "right" else -0.0875
+        if cmd["op"] == "set_root" and "height" in cmd:
+            cmd["height"] -= 0.02
+        cmds.append(cmd)
+    return _honest_script(task_id, cmds)
+
+
+def _honest_script(task_id: str, commands: list[dict]) -> list[Step]:
     skel = build_mannequin()
     clip = new_clip(get_task(task_id), skel)
     steps: list[Step] = [("start_session", {"task": task_id}), ("answer_quiz", {"answers": AUTO})]
-    for cmd in reference_commands(task_id):
+    for cmd in commands:
         clip = apply_command(skel, clip, cmd)
         args = {k: v for k, v in cmd.items() if k != "op"}
         steps.append((cmd["op"], {**args, "expect": _honest_expect(skel, clip, cmd)}))

@@ -15,6 +15,7 @@ ARM_RANGE = 5.0
 LOOP_ANGLE_TOL = 5.0
 LOOP_POS_TOL = 0.03
 BACKWARD_TOL = 0.01
+CROSS_TOL = 0.02
 
 SIGN_HINT = (
     "Remember forward = -Y at heading 0 (rotate it with the heading). A swing foot moves forward relative "
@@ -177,4 +178,23 @@ def root_progression(ctx: CheckContext) -> list[CheckResult]:
         f"the root moves backward along the track (frames {frames_text(bad)})",
         {"min_step": float(min(np.diff(fwd)))},
         "Track forward is measured along the start facing. Keep set_root forward values increasing over time.",
+    )]
+
+
+@register("gait.laterality")
+def laterality(ctx: CheckContext) -> list[CheckResult]:
+    if ctx.kind not in ("step", "walk"):
+        return []
+    gaps = [(relation(s, "left_ankle", "right_ankle")["left"], s.frame) for s in ctx.states]
+    bad = [f for gap, f in gaps if gap < -CROSS_TOL]
+    if not bad:
+        return []
+    worst = min(gap for gap, _ in gaps)
+    return [CheckResult(
+        "gait.laterality", "error", bad,
+        f"the LEFT foot is {-worst:.2f} m to the RIGHT of the right foot (legs crossed or sides swapped; "
+        f"frames {frames_text(bad)})",
+        {"min_gap": worst},
+        "The left foot belongs on the mannequin's left: +X at heading 0 (left = forward turned +90 deg). "
+        "Plant the left foot with left > 0 and the right foot with left < 0, or leave left out for the default stance.",
     )]
