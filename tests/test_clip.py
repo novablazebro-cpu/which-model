@@ -148,3 +148,12 @@ def test_reference_commands_apply_and_evaluate(skel, tid, end):
     assert len(states) == end + 1
     for s in states:
         assert all(np.all(np.isfinite(p)) for p in s.points.values())
+
+
+def test_keyed_angles_reported_as_keyed_past_gimbal(skel):
+    # Review I6: abduction is the middle Euler axis; past 90 deg a decomposition flips to an equivalent triple.
+    clip = make(skel, [{"op": "set_pose", "frame": 0, "angles": {"left_shoulder.abduction": 120}}])
+    st = evaluate_frame(skel, clip, 0)
+    assert np.isclose(st.angles["left_shoulder.abduction"], 120)
+    assert np.isclose(st.angles["left_shoulder.flexion"], 0) and np.isclose(st.angles["left_shoulder.internal_rotation"], 0)
+    assert st.points["left_hand"][2] > st.points["left_shoulder"][2]  # the arm really is raised above shoulder height

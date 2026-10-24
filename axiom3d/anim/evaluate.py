@@ -51,8 +51,10 @@ def _leg_target(skel, clip: Clip, side: str, frame: int, notes: list[str]):
 def evaluate_frame(skel, clip: Clip, frame: int) -> FrameState:
     position, heading = clip.root_at(frame, skel.dims["pelvis_height"])
     keyed = clip.keyed_channels()
+    # Keyed angles are reported exactly as keyed; only IK-driven joints are decomposed back to angles.
+    angles = {ch: clip.channel_at(ch, frame) for ch in skel.channels()}
     rotations = {
-        name: skel.angles_to_quat(name, {d.name: clip.channel_at(f"{name}.{d.name}", frame) for d in joint.dofs})
+        name: skel.angles_to_quat(name, {d.name: angles[f"{name}.{d.name}"] for d in joint.dofs})
         for name, joint in skel.joints.items()
     }
     notes: list[str] = []
@@ -77,12 +79,11 @@ def evaluate_frame(skel, clip: Clip, frame: int) -> FrameState:
     for name, p in points.items():
         if not np.all(np.isfinite(p)):
             raise RuntimeError(f"non-finite position for {name} at frame {frame}")
-    angles = {
-        f"{name}.{dof}": value
-        for name, joint in skel.joints.items()
-        if joint.dofs
-        for dof, value in skel.quat_to_angles(name, rotations[name]).items()
-    }
+    for side, ik in iks.items():
+        if ik is not None:
+            for joint in LEG_JOINTS:
+                name = f"{side}_{joint}"
+                angles.update({f"{name}.{dof}": v for dof, v in skel.quat_to_angles(name, rotations[name]).items()})
     return FrameState(frame, position, heading, rotations, joint_world, points, angles, modes, iks, notes)
 
 
