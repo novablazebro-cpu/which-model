@@ -51,7 +51,7 @@ def build_mannequin(height: float = 1.75) -> Skeleton:
         joints += [
             Joint(f"{side}_hip", "pelvis", (sx * 0.05 * h, 0.0, 0.0), _hip_dofs(side)),
             Joint(f"{side}_knee", f"{side}_hip", (0.0, 0.0, -0.245 * h), (Dof("flexion", "x", +1, 0, 150),)),
-            Joint(f"{side}_ankle", f"{side}_knee", (0.0, 0.0, -0.246 * h), (Dof("dorsiflexion", "x", -1, -50, 20),)),
+            Joint(f"{side}_ankle", f"{side}_knee", (0.0, 0.0, -0.246 * h), (Dof("dorsiflexion", "x", -1, -50, 30),)),
         ]
 
     extra: dict[str, tuple[str, tuple[float, float, float]]] = {"head_top": ("head", (0.0, 0.0, 0.13 * h))}
