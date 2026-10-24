@@ -22,6 +22,29 @@ def test_reference_meets_criteria(skel, tid):
         assert ok, (tid, crit.id, measured)
 
 
+@pytest.mark.parametrize("tid", list(TASKS))
+def test_reference_is_not_a_crouch(skel, tid):
+    # Real walking keeps the stance knee near 5-15 deg; a constant low pelvis gives ~34 deg.
+    from axiom3d.measure import foot_contact
+
+    # Checked at mid-stance: the middle frame of each single-support run.
+    _, _, states = solve(skel, tid, reference_commands(tid))
+    stance = [next((sd for sd in ("left", "right") if foot_contact(s, sd)), None)
+              if sum(foot_contact(s, sd) for sd in ("left", "right")) == 1 else None for s in states]
+    runs, start = [], None
+    for i, side in enumerate(stance + [None]):
+        if start is not None and side != stance[start]:
+            runs.append((start, i - 1))
+            start = None
+        if start is None and side is not None:
+            start = i
+    assert runs, tid
+    for a, b in runs:
+        mid = states[(a + b) // 2]
+        assert mid.angles[f"{stance[a]}_knee.flexion"] <= 20, (tid, mid.frame)
+    assert max(states[0].angles["left_knee.flexion"], states[0].angles["right_knee.flexion"]) <= 20
+
+
 def test_doing_nothing_fails_criteria(skel):
     task, clip, states = solve(skel, "step_forward", [])
     results = {c.id: c.fn(skel, clip, states)[0] for c in task.criteria}
