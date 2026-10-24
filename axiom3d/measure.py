@@ -8,6 +8,9 @@ from axiom3d.conventions import CONTACT_EPS, character_axes, world_to_track
 
 
 def foot_contact(state, side: str) -> bool:
+    # A swinging foot is in the air by definition, even where its arc starts and ends below CONTACT_EPS.
+    if state.leg_modes.get(side) == "swing":
+        return False
     return min(state.points[f"{side}_heel"][2], state.points[f"{side}_toe"][2]) <= CONTACT_EPS
 
 

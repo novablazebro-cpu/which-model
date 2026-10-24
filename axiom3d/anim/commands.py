@@ -10,6 +10,7 @@ from axiom3d.conventions import track_to_world
 
 SIDES = ("left", "right")
 OPS = ("set_root", "set_pose", "plant_foot", "swing_foot")
+MIN_APEX = 0.03
 
 
 class CommandError(ValueError):
@@ -116,8 +117,8 @@ def _swing(clip: Clip, cmd: dict) -> None:
     side = _side(cmd.get("side"))
     start, end = _span(clip, cmd)
     apex = _num(cmd.get("apex", 0.08), "apex")
-    if not 0.0 <= apex <= 0.3:
-        raise CommandError(f"apex must be within 0..0.3 m, got {apex}")
+    if not MIN_APEX <= apex <= 0.3:
+        raise CommandError(f"apex must be within {MIN_APEX}..0.3 m (a swing lifts the foot), got {apex}")
     for s in clip.swings:
         if s.side == side and _overlaps(start, end, s.start, s.end, touching=False):
             raise CommandError(f"{side} swing {start}..{end} would overlap the {side} swing {s.start}..{s.end}")

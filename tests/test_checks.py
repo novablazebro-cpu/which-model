@@ -162,3 +162,24 @@ def test_negative_hip_flexion_hint_names_the_backward_leg(skel):
     cmds = [{"op": "set_pose", "frame": 12, "angles": {"left_hip.flexion": -30}}]
     res = [r for r in run_checks(ctx_for(skel, "step_forward", cmds)) if r.id == "anatomy.joint_limits"]
     assert res and "BACKWARD" in res[0].hint and "positive" in res[0].hint
+
+
+@pytest.mark.parametrize("tid", list(TASKS))
+@pytest.mark.parametrize("apex", [0.03, 0.05, 0.08, 0.12])
+def test_clean_swings_never_count_as_slide(skel, tid, apex):
+    # Review C1: the ends of a low swing arc sit under the contact height and used to be scored as sliding.
+    cmds = [dict(c, apex=apex) if c["op"] == "swing_foot" else c for c in reference_commands(tid)]
+    found = ids(run_checks(ctx_for(skel, tid, cmds)), "error")
+    assert not found & {"gait.foot_slide", "gait.moonwalk"}, found
+
+
+def test_long_swing_is_not_slide(skel):
+    cmds = [c for c in reference_commands("step_forward") if c["op"] not in ("swing_foot", "plant_foot")] + [
+        plant("right", 0, 24, 0), plant("left", 0, 6, 0), swing("left", 6, 22), plant("left", 22, 24, 0.36)]
+    assert not ids(run_checks(ctx_for(skel, "step_forward", cmds)), "error")
+
+
+def test_dragging_swing_is_rejected(skel):
+    from axiom3d.anim.commands import CommandError
+    with pytest.raises(CommandError, match="apex"):
+        ctx_for(skel, "step_forward", [{"op": "swing_foot", "side": "left", "start": 6, "end": 18, "apex": 0.01}])
