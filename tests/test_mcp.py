@@ -57,3 +57,26 @@ def test_mcp_accepts_lenient_arguments(home):
         assert "APPLIED" in out
 
     anyio.run(run)
+
+
+def test_internal_errors_never_escape(home, monkeypatch, capsys):
+    from axiom3d.api import Workbench
+    from axiom3d.cli import main
+    from axiom3d.mcp_server import build_server
+
+    def boom(self, *a, **k):
+        raise KeyError("surprise")
+
+    monkeypatch.setattr(Workbench, "observe", boom)
+
+    async def run():
+        server = build_server(home)
+        out = str(await server.call_tool("observe", {}))
+        assert "INTERNAL ERROR (please report): KeyError" in out
+
+    anyio.run(run)
+    main(["call", "start_session", "--json", '{"task": "step_forward"}', "--home", str(home)])
+    capsys.readouterr()
+    assert main(["call", "observe", "--home", str(home)]) == 2
+    out = capsys.readouterr().out
+    assert "INTERNAL ERROR (please report): KeyError" in out and "Traceback" not in out

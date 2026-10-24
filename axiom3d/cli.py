@@ -46,6 +46,9 @@ def _call(args) -> int:
     except TypeError as e:
         print(f"ERROR: bad arguments for {args.tool}: {e}")
         return 1
+    except Exception as e:  # safety net: never show a traceback
+        print(f"INTERNAL ERROR (please report): {type(e).__name__}: {e}")
+        return 2
     print(result.text)
     if result.images:
         out = home / "images"

@@ -23,7 +23,7 @@ from axiom3d.protocol.calc import CalcError, run_calc
 from axiom3d.protocol.gate import run_exam
 from axiom3d.protocol.predict import PredictionError, evaluate_prediction, is_precise, parse_prediction
 from axiom3d.rig.humanoid import build_mannequin
-from axiom3d.session_store import current_id, load, new_session, rebuild, save
+from axiom3d.session_store import ReplayError, current_id, load, new_session, rebuild, save
 from axiom3d.tasks.library import get_task
 
 VIEWS = ("report", "timeline", "sheet", "filmstrip", "footprints")
@@ -108,6 +108,12 @@ class Workbench:
         except (FileNotFoundError, ValueError) as e:
             raise AxiomError(str(e)) from None
 
+    def _rebuild(self, st):
+        try:
+            return rebuild(st, self.skel)
+        except ReplayError as e:
+            raise AxiomError(f"{e}; call undo() to drop it, or start a new session") from None
+
     def _counts(self, st, clip, states) -> tuple[int, int]:
         results = run_checks(CheckContext(self.skel, clip, states, get_task(st.task_id).kind))
         return (sum(r.severity == "error" for r in results), sum(r.severity == "warning" for r in results))
@@ -116,7 +122,7 @@ class Workbench:
         if not st.protocol:
             return "\n".join(lines)
         if clip is None:
-            clip, states = rebuild(st, self.skel)
+            clip, states = self._rebuild(st)
         errors, warnings = self._counts(st, clip, states)
         verdict = "CERTIFIED" if st.ledger["certified"] else "NOT COMPLETE"
         lines.append(f"STATUS: phase={st.phase} · errors={errors} · warnings={warnings} · {verdict}")
@@ -182,7 +188,7 @@ class Workbench:
     def calc(self, expr: str, session: str | None = None) -> ToolResult:
         """Exact math on the scene. Allowed in every phase; never changes the scene."""
         st = self._load(session)
-        clip, states = rebuild(st, self.skel)
+        clip, states = self._rebuild(st)
         try:
             result = run_calc(expr, self.skel, clip, states, st.variables)
         except CalcError as e:
@@ -214,7 +220,7 @@ class Workbench:
     @_locked
     def observe(self, frames=None, views=None, session: str | None = None) -> ToolResult:
         st = self._load(session)
-        clip, states = rebuild(st, self.skel)
+        clip, states = self._rebuild(st)
         views = list(views) if views else ["report", "timeline"]
         bad = [v for v in views if v not in VIEWS]
         if bad:
@@ -242,7 +248,7 @@ class Workbench:
     @_locked
     def check(self, session: str | None = None) -> ToolResult:
         st = self._load(session)
-        clip, states = rebuild(st, self.skel)
+        clip, states = self._rebuild(st)
         task = get_task(st.task_id)
         results = run_checks(CheckContext(self.skel, clip, states, task.kind))
         lines = ["CHECKS:" if results else "CHECKS: none failed"]
@@ -282,7 +288,7 @@ class Workbench:
                 save(st, self.home)
                 why = "No expect given." if not predictions else "None of your predictions is precise."
                 raise AxiomError(f"{why} {EXPECT_HELP}")
-        before, states_before = rebuild(st, self.skel)
+        before, states_before = self._rebuild(st)
         try:
             clip = apply_command(self.skel, before, cmd)
         except CommandError as e:
@@ -423,7 +429,7 @@ class Workbench:
         if st.protocol and st.pending_discrepancy:
             raise AxiomError("Resolve the failed prediction first: undo() or accept_discrepancy(reason).")
         claims = [claims] if isinstance(claims, str) else list(claims or [])
-        clip, states = rebuild(st, self.skel)
+        clip, states = self._rebuild(st)
         exam = run_exam(self.skel, clip, states, get_task(st.task_id), claims, st.protocol, st.variables)
         st.ledger["exam_attempts"] += 1
         st.ledger["task_success"] = exam.task_success
@@ -456,7 +462,7 @@ class Workbench:
         from axiom3d.export.gltf import export_glb
 
         st = self._load(session)
-        clip, states = rebuild(st, self.skel)
+        clip, states = self._rebuild(st)
         path = export_glb(self.skel, clip, states, self.home / "exports" / f"{st.id}.glb")
         return ToolResult(self._finish_text(st, [f"EXPORTED: {path} (glTF 2.0 binary; Y-up, opens in Blender)"], clip, states))
 

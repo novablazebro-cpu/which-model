@@ -256,3 +256,12 @@ def test_swing_before_landing_plant_explains_itself(home):
     wb.plant_foot(side="left", start=0, end=6)
     res = wb.swing_foot(side="left", start=6, end=18)
     assert "add the plant that ends the swing" in res.text
+
+
+def test_input_bounds(home):
+    wb = started(home, protocol=False)
+    for call in (lambda: wb.set_root(frame=24, forward=1e308), lambda: wb.set_root(frame=24, left=-51),
+                 lambda: wb.set_pose(frame=0, angles={"left_hip.flexion": 1e9}),
+                 lambda: wb.set_root(frame=0, heading=1e5), lambda: wb.plant_foot(side="left", start=0, end=4, forward=99)):
+        with pytest.raises(AxiomError):
+            call()

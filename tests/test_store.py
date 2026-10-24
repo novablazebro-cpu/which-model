@@ -54,3 +54,44 @@ def test_ledger_calibration():
     led["predictions_total"], led["predictions_correct"] = 4, 3
     assert calibration(led) == 0.75
     assert {"quiz_attempts", "discrepancies", "certified", "task_success", "rejected_edits"} <= set(led)
+
+
+def _write_v1_session(home, sid, commands=()):
+    import json
+    from axiom3d.protocol.ledger import new_ledger
+    ledger = new_ledger("old", "step_forward", False)
+    for k in ("dry_runs", "batches"):
+        ledger.pop(k)
+    data = {"id": sid, "task_id": "step_forward", "protocol": False, "phase": "WORKING", "seed": 1,
+            "commands": list(commands), "quiz": [], "pending_discrepancy": None, "ledger": ledger}
+    (home / "sessions").mkdir(parents=True, exist_ok=True)
+    (home / "sessions" / f"{sid}.json").write_text(json.dumps(data))
+    (home / "current").write_text(sid)
+
+
+def test_v1_session_file_migrates(skel, home):
+    from axiom3d.api import Workbench
+    _write_v1_session(home, "step_forward-0001")
+    st = load("step_forward-0001", home)
+    assert st.version == 2 and st.variables == {} and st.sandbox_seen == [] and st.ledger["dry_runs"] == 0
+    wb = Workbench(home)
+    assert "POINTS" in wb.observe().text
+    assert wb.set_root(frame=24, forward=0.1, dry_run=True).text.startswith("DRY RUN")
+
+
+def test_unreplayable_command_is_a_clear_error(skel, home):
+    import pytest as _pytest
+    from axiom3d.api import AxiomError, Workbench
+    _write_v1_session(home, "step_forward-0002", [{"op": "plant_foot", "side": "left", "start": 0, "end": 99}])
+    wb = Workbench(home)
+    with _pytest.raises(AxiomError, match="stored command #1.*undo"):
+        wb.observe()
+    wb.undo()
+    assert "POINTS" in wb.observe().text
+
+
+def test_session_id_with_newline_rejected(skel, home):
+    st = new_session("step_forward", False, None, home, skel, session_id="step_forward-abc")
+    save(st, home)
+    with pytest.raises(FileNotFoundError):
+        load("step_forward-abc\n", home)

@@ -12,6 +12,7 @@ SIDES = ("left", "right")
 OPS = ("set_root", "set_pose", "plant_foot", "swing_foot")
 MIN_APEX = 0.03
 MAX_ANGLE = 720.0
+MAX_DISTANCE = 50.0
 
 
 class CommandError(ValueError):
@@ -27,6 +28,13 @@ def _num(value, what: str) -> float:
         raise CommandError(f"{what} must be a number, got {value!r}") from None
     if not math.isfinite(x):
         raise CommandError(f"{what} must be a finite number, got {value!r}")
+    return x
+
+
+def _bounded(value, what: str, limit: float, unit: str) -> float:
+    x = _num(value, what)
+    if abs(x) > limit:
+        raise CommandError(f"{what} must be within -{limit:g}..{limit:g} {unit}, got {value!r}")
     return x
 
 
@@ -92,7 +100,9 @@ def apply_command(skel, clip: Clip, cmd: dict) -> Clip:
 
 def _set_root(skel, clip: Clip, cmd: dict) -> None:
     frame = _frame(clip, cmd.get("frame"))
-    values = {name: _num(cmd[name], name) for name in ROOT_CHANNELS if cmd.get(name) is not None}
+    values = {name: _bounded(cmd[name], name, MAX_ANGLE if name == "heading" else MAX_DISTANCE,
+                             "degrees" if name == "heading" else "m")
+              for name in ROOT_CHANNELS if cmd.get(name) is not None}
     if not values:
         raise CommandError("set_root needs at least one of forward, left, height, heading")
     height = values.get("height")
@@ -112,7 +122,7 @@ def _set_pose(skel, clip: Clip, cmd: dict) -> None:
     for channel, value in angles.items():
         if channel not in valid:
             raise CommandError(f"unknown channel {channel!r}; valid channels: {', '.join(valid)}")
-        deg = _num(value, channel)
+        deg = _bounded(value, channel, MAX_ANGLE, "degrees")
         clip.pose_keys = [k for k in clip.pose_keys if not (k.frame == frame and k.channel == channel)]
         clip.pose_keys.append(PoseKey(frame, channel, deg))
 
@@ -127,8 +137,9 @@ def _plant(skel, clip: Clip, cmd: dict) -> None:
         if s.side == side and _overlaps(start, end, s.start, s.end, touching=False):
             raise CommandError(f"{side} plant {start}..{end} would overlap the {side} swing {s.start}..{s.end}")
     sign = 1.0 if side == "left" else -1.0
-    forward = _num(cmd["forward"], "forward") if cmd.get("forward") is not None else 0.0
-    left = _num(cmd["left"], "left") if cmd.get("left") is not None else sign * skel.dims["hip_half_width"]
+    forward = _bounded(cmd["forward"], "forward", MAX_DISTANCE, "m") if cmd.get("forward") is not None else 0.0
+    left = (_bounded(cmd["left"], "left", MAX_DISTANCE, "m") if cmd.get("left") is not None
+            else sign * skel.dims["hip_half_width"])
     yaw = None
     if cmd.get("facing") is not None:
         yaw = _num(cmd["facing"], "facing")

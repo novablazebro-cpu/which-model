@@ -22,6 +22,8 @@ def _reply(call) -> list | str:
         result: ToolResult = call()
     except AxiomError as e:
         return f"ERROR: {e}"
+    except Exception as e:  # safety net: a model must never see a crash
+        return f"INTERNAL ERROR (please report): {type(e).__name__}: {e}"
     return [result.text] + [Image(data=png, format="png") for _, png in result.images]
 
 

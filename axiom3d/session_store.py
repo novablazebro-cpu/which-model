@@ -11,13 +11,18 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from axiom3d.anim.commands import apply_command
+from axiom3d.anim.commands import CommandError, apply_command
 from axiom3d.anim.evaluate import evaluate_clip
 from axiom3d.protocol.briefing import make_quiz
 from axiom3d.protocol.ledger import new_ledger
 from axiom3d.tasks.library import get_task, new_clip
 
-_ID = re.compile(r"^[a-z_]+-[0-9a-f]+$")
+_ID = re.compile(r"[a-z_]+-[0-9a-f]+")
+VERSION = 2
+
+
+class ReplayError(ValueError):
+    """A stored command no longer applies (e.g. a session saved by an older version)."""
 
 
 @dataclass
@@ -33,6 +38,7 @@ class SessionState:
     ledger: dict = field(default_factory=dict)
     variables: dict = field(default_factory=dict)
     sandbox_seen: list[str] = field(default_factory=list)
+    version: int = VERSION
 
 
 def _path(home: Path, session_id: str) -> Path:
@@ -70,12 +76,25 @@ def _atomic_write(path: Path, text: str) -> None:
 
 
 def load(session_id: str, home: Path) -> SessionState:
-    if not isinstance(session_id, str) or not _ID.match(session_id) or not _path(home, session_id).exists():
+    if not isinstance(session_id, str) or not _ID.fullmatch(session_id) or not _path(home, session_id).exists():
         raise FileNotFoundError(f"unknown session {session_id!r}; call start_session to begin one")
     try:
-        return SessionState(**json.loads(_path(home, session_id).read_text()))
-    except (json.JSONDecodeError, TypeError) as e:
-        raise ValueError(f"unreadable session {session_id!r} ({e}); call start_session to begin a new one") from None
+        data = json.loads(_path(home, session_id).read_text())
+        return SessionState(**_migrate(data))
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, KeyError, AttributeError) as e:
+        raise ValueError(f"unreadable session {session_id!r} ({type(e).__name__}); call start_session to begin a new one") from None
+
+
+def _migrate(data: dict) -> dict:
+    """Bring a session file from any older version up to VERSION; unknown keys are dropped."""
+    known = {f.name for f in dataclasses.fields(SessionState)}
+    data = {k: v for k, v in data.items() if k in known}
+    data.setdefault("variables", {})
+    data.setdefault("sandbox_seen", [])
+    for key, value in new_ledger(data["ledger"].get("label"), data["task_id"], data["protocol"]).items():
+        data["ledger"].setdefault(key, value)
+    data["version"] = VERSION
+    return data
 
 
 def current_id(home: Path) -> str | None:
@@ -85,6 +104,9 @@ def current_id(home: Path) -> str | None:
 
 def rebuild(state: SessionState, skel):
     clip = new_clip(get_task(state.task_id), skel)
-    for cmd in state.commands:
-        clip = apply_command(skel, clip, cmd)
+    for i, cmd in enumerate(state.commands):
+        try:
+            clip = apply_command(skel, clip, cmd)
+        except CommandError as e:
+            raise ReplayError(f"stored command #{i + 1} no longer applies ({e})") from None
     return clip, evaluate_clip(skel, clip)
