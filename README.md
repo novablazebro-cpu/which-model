@@ -13,9 +13,10 @@ Research on models doing 3D work keeps finding the same failures:
 
 - **They invent angles.** Agents without measurement tools hallucinate rotation
   angles and report them as correct (AgentsCAD, 2026).
-- **They get rotation direction and order wrong.** Even the best multimodal
-  models score about 54% on coarse orientation questions and 33% on
-  fine-grained ones (DORI benchmark).
+- **They get rotation direction and order wrong.** On the DORI orientation
+  benchmark the best multimodal model scores only 54-64% on coarse questions and
+  33-43% on fine-grained ones (the paper's versions report different numbers).
+  Compound rotations and reference-frame shifts are the hardest cases.
 - **Their vision is unreliable.** VLMs "hallucinate non-existent visual
   differences" between renders (BlenderGym, CVPR 2025).
 - **Physics slips.** Floating and disconnected parts are common even when the
