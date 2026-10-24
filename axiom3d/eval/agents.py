@@ -28,8 +28,9 @@ def _honest_expect(skel, clip, cmd: dict) -> list[str]:
     if cmd["op"] == "set_root":
         f = int(cmd["frame"])
         s = states[f - first]
-        fwd, _ = track_coords(clip, s.root_position[:2])
-        return [f"root.forward@{f} ~= {fwd:.3f} ± 0.01", f"root.height@{f} ~= {s.root_position[2]:.3f} ± 0.01"]
+        fwd, left = track_coords(clip, s.root_position[:2])
+        return [f"root.forward@{f} ~= {fwd:.3f} ± 0.01", f"root.left@{f} ~= {left:.3f} ± 0.01",
+                f"root.height@{f} ~= {s.root_position[2]:.3f} ± 0.01", f"root.heading@{f} ~= {s.heading_deg:.1f} ± 1"]
     if cmd["op"] == "set_pose":
         f = int(cmd["frame"])
         return [f"{ch}@{f} ~= {states[f - first].angles[ch]:.1f} ± 1" for ch in cmd["angles"]]

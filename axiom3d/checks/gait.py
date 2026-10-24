@@ -15,6 +15,7 @@ ARM_RANGE = 5.0
 LOOP_ANGLE_TOL = 5.0
 LOOP_POS_TOL = 0.03
 BACKWARD_TOL = 0.01
+TURN_STEP_DEG = 20.0
 CROSS_TOL = 0.02
 
 SIGN_HINT = (
@@ -26,6 +27,14 @@ SIGN_HINT = (
 
 def _state(ctx: CheckContext, frame: int):
     return ctx.states[frame - ctx.states[0].frame]
+
+
+def _foot_yaw_change(a, b, side: str) -> float:
+    """Signed change of the foot's heading (heel→toe direction) between two states, in degrees."""
+    def yaw(s):
+        d = s.points[f"{side}_toe"][:2] - s.points[f"{side}_heel"][:2]
+        return np.degrees(np.arctan2(d[0], -d[1]))
+    return float((yaw(b) - yaw(a) + 180.0) % 360.0 - 180.0)
 
 
 @register("gait.support")
@@ -48,14 +57,18 @@ def foot_slide(ctx: CheckContext) -> list[CheckResult]:
     results = []
     for side in ("left", "right"):
         for a, b in contact_windows(ctx.states, side):
-            start = foot_xy(_state(ctx, a), side)
-            drifts = [(float(np.linalg.norm(foot_xy(_state(ctx, f), side) - start)), f) for f in range(a, b + 1)]
-            drift, at = max(drifts)
+            # Drift of ankle, heel and toe: a foot can also slide by pivoting about its ankle.
+            parts = (f"{side}_ankle", f"{side}_heel", f"{side}_toe")
+            starts = {n: _state(ctx, a).points[n][:2] for n in parts}
+            drifts = [(float(np.linalg.norm(_state(ctx, f).points[n][:2] - starts[n])), f, n)
+                      for f in range(a, b + 1) for n in parts]
+            drift, at, part = max(drifts)
             if drift <= SLIDE_TOL:
                 continue
-            direction = foot_xy(_state(ctx, at), side) - start
+            direction = _state(ctx, at).points[part][:2] - starts[part]
             travel = _state(ctx, b).root_position[:2] - _state(ctx, a).root_position[:2]
-            moonwalk = np.linalg.norm(travel) > 1e-3 and float(direction @ travel) < 0
+            # Moonwalk = sliding clearly against the travel direction (> 60 deg away), not merely sideways.
+            moonwalk = np.linalg.norm(travel) > 1e-3 and float(direction @ travel) < -0.5 * np.linalg.norm(direction) * np.linalg.norm(travel)
             frames = list(range(a, b + 1))
             if moonwalk:
                 results.append(CheckResult(
@@ -87,6 +100,8 @@ def step_direction(ctx: CheckContext) -> list[CheckResult]:
             if a <= first or b >= last:
                 continue
             lift, land = _state(ctx, a - 1), _state(ctx, b + 1)
+            if abs(_foot_yaw_change(lift, land, side)) > TURN_STEP_DEG:
+                continue  # a turning step moves the foot around the pivot; judged by laterality and limits instead
             facing, _, _ = character_axes(lift.heading_deg)
             disp = foot_xy(land, side) - foot_xy(lift, side)
             horizontal = float(np.linalg.norm(disp))

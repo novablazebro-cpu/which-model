@@ -13,6 +13,10 @@ def _limit_hint(channel: str, dof, worst: float) -> str:
         moves = "the foot backward" if joint == "knee" else "the hand forward and up"
         return (f"The {joint} only bends one way: positive flexion moves {moves}; "
                 "a negative value is hyperextension. Use a positive angle.")
+    if dof.name == "internal_rotation":
+        return ("Planted feet keep their heading, so turning the body more than 40 deg over a planted foot "
+                "overloads the hip. Turn with step-turns: re-plant each foot facing the new direction "
+                "(plant_foot facing=...), turning at most about 35 deg per step.")
     if dof.name == "flexion" and worst < dof.min_deg:
         return (f"Negative {channel} is extension: it swings the limb BACKWARD. To move it forward use a "
                 f"positive angle (limit {dof.min_deg:g}..{dof.max_deg:g}).")

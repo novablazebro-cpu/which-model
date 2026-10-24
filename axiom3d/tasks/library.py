@@ -37,7 +37,8 @@ def _step_length(side: str, low: float, high: float) -> Criterion:
         swings = swing_windows(states, side)
         if not swings:
             return False, f"{side} foot never left the ground (step length 0.00 m)"
-        lift = states[swings[0][0] - states[0].frame - 1] if swings[0][0] > states[0].frame else states[0]
+        last = swings[-1]  # the final step (earlier ones may be turning steps)
+        lift = states[last[0] - states[0].frame - 1] if last[0] > states[0].frame else states[0]
         forward, _, _ = character_axes(lift.heading_deg)
         length = float((foot_xy(states[-1], side) - foot_xy(lift, side)) @ forward[:2])
         return low <= length <= high, f"{side} step {length:+.2f} m along the facing at lift-off"

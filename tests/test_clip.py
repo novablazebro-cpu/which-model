@@ -157,3 +157,28 @@ def test_keyed_angles_reported_as_keyed_past_gimbal(skel):
     assert np.isclose(st.angles["left_shoulder.abduction"], 120)
     assert np.isclose(st.angles["left_shoulder.flexion"], 0) and np.isclose(st.angles["left_shoulder.internal_rotation"], 0)
     assert st.points["left_hand"][2] > st.points["left_shoulder"][2]  # the arm really is raised above shoulder height
+
+
+def test_planted_toe_holds_during_turn(skel):
+    clip = make(skel, [
+        {"op": "set_root", "frame": 0, "heading": 0, "height": 0.9},
+        {"op": "set_root", "frame": 24, "heading": 30},
+        {"op": "plant_foot", "side": "left", "start": 0, "end": 24},
+    ])
+    states = evaluate_clip(skel, clip)
+    ankle = np.array([s.points["left_ankle"][:2] for s in states])
+    assert np.allclose(ankle, ankle[0], atol=1e-9)
+    for name in ("left_toe", "left_heel"):  # a 1-DOF ankle leaves ~1 mm of residual over a 30 deg turn (v1: 0.29 m sweep)
+        xy = np.array([s.points[name][:2] for s in states])
+        assert np.abs(xy - xy[0]).max() < 0.002, name
+
+
+def test_plant_facing_sets_foot_yaw(skel):
+    import math
+    clip = make(skel, [{"op": "set_root", "frame": 0, "height": 0.9},
+                       {"op": "plant_foot", "side": "left", "start": 0, "end": 24, "facing": 20}])
+    s = evaluate_frame(skel, clip, 12)
+    d = s.points["left_toe"][:2] - s.points["left_heel"][:2]
+    assert abs(math.degrees(math.atan2(d[0], -d[1])) - 20) < 2
+    with pytest.raises(CommandError, match="facing"):
+        make(skel, [{"op": "plant_foot", "side": "left", "start": 0, "end": 24, "facing": 1e9}])

@@ -75,9 +75,10 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
 
     @tool
     def plant_foot(side: str, start: int, end: int, forward: float | None = None, left: float | None = None,
-                   expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:
-        """Pin a foot to the ground at track (forward, left) from start to end; the tool solves the leg."""
-        return _reply(lambda: wb.plant_foot(side, start, end, forward, left, expect, dry_run))
+                   expect: list[str] | str | None = None, dry_run: bool = False,
+                   facing: float | None = None) -> list | str:
+        """Pin a foot at track (forward, left) from start to end, toes along `facing` (deg; default: body heading)."""
+        return _reply(lambda: wb.plant_foot(side, start, end, forward, left, expect, dry_run, facing))
 
     @tool
     def swing_foot(side: str, start: int, end: int, apex: float = 0.08, expect: list[str] | str | None = None,

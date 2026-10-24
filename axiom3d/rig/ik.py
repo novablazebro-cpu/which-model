@@ -23,13 +23,17 @@ def _unit(v) -> np.ndarray:
     return v / np.linalg.norm(v)
 
 
-def solve_leg(skel, side: str, pelvis_position, heading_deg: float, ankle_target) -> LegIKResult:
-    """Place the ankle at `ankle_target` with the knee aimed along the facing and the foot flat."""
+def solve_leg(skel, side: str, pelvis_position, heading_deg: float, ankle_target,
+              foot_yaw_deg: float | None = None) -> LegIKResult:
+    """Place the ankle at `ankle_target` with the foot flat, pointing along `foot_yaw_deg` (default: the body
+    heading), and the knee over the toes. Hip internal rotation absorbs any difference to the body heading."""
     a, b = skel.dims["thigh"], skel.dims["shank"]
     knee = skel.dof(f"{side}_knee.flexion")
     ankle = skel.dof(f"{side}_ankle.dorsiflexion")
     heading = heading_quat(heading_deg)
-    forward, left, _ = character_axes(heading_deg)
+    yaw = heading_deg if foot_yaw_deg is None else foot_yaw_deg
+    foot_rot = heading_quat(yaw)
+    forward, left, _ = character_axes(yaw)
 
     hip = np.asarray(pelvis_position, dtype=float) + quat_rotate(heading, skel.joints[f"{side}_hip"].offset)
     d = np.asarray(ankle_target, dtype=float) - hip
@@ -59,7 +63,7 @@ def solve_leg(skel, side: str, pelvis_position, heading_deg: float, ankle_target
     knee_flexion = float(np.clip(180.0 - np.degrees(interior), knee.min_deg, knee.max_deg))
 
     knee_world = quat_mul(hip_world, skel.angles_to_quat(f"{side}_knee", {"flexion": knee_flexion}))
-    q = quat_mul(quat_conj(knee_world), heading)
+    q = quat_mul(quat_conj(knee_world), foot_rot)
     twist_about_x = np.degrees(2.0 * np.arctan2(q[1], q[0]))
     twist_about_x = (twist_about_x + 180.0) % 360.0 - 180.0
     dorsiflexion = float(np.clip(ankle.sign * twist_about_x, ankle.min_deg, ankle.max_deg))

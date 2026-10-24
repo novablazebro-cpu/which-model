@@ -76,14 +76,24 @@ _REFERENCE = {
         _arms(48, left=0, right=0),
     ],
     "turn_then_step": [
+        # A step-turn: planted feet keep their heading, so the body never turns more than 35 deg over a
+        # planted foot. The left foot opens to 70 deg, the right steps to 90 deg, then the left steps along +X.
         {"op": "set_root", "frame": 0, "heading": 0, "height": 0.92},
-        {"op": "set_root", "frame": 12, "heading": 90, "height": 0.905, "left": 0.0},
-        {"op": "set_root", "frame": 36, "left": 0.17, "height": 0.86},
-        _bob(23, 0.90),
-        _plant("right", 0, 36),
-        _plant("left", 0, 14),
-        _swing("left", 14, 32),
-        _plant("left", 32, 36, -0.0875, 0.4075),
+        {"op": "set_root", "frame": 8, "heading": 35},
+        {"op": "set_root", "frame": 14, "heading": 35},
+        {"op": "set_root", "frame": 20, "heading": 75},
+        {"op": "set_root", "frame": 24, "heading": 90, "height": 0.92, "left": 0.0},
+        _bob(28, 0.92),
+        _bob(32, 0.885),
+        {"op": "set_root", "frame": 36, "left": 0.18, "height": 0.885},
+        _plant("right", 0, 14),
+        _plant("left", 0, 8),
+        _swing("left", 8, 14),
+        dict(_plant("left", 14, 24, -0.0822, 0.0299), facing=70),
+        _swing("right", 14, 20),
+        dict(_plant("right", 20, 36, 0.0875, 0.0), facing=90),
+        _swing("left", 24, 32),
+        dict(_plant("left", 32, 36, -0.0875, 0.36), facing=90),
     ],
 }
 

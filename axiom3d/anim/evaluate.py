@@ -27,11 +27,19 @@ class FrameState:
     notes: list[str] = field(default_factory=list)
 
 
+def _plant_yaw(skel, clip: Clip, plant) -> float:
+    """A plant's foot heading: explicit `facing`, else the root heading when the plant starts (resolved live)."""
+    if plant.yaw_deg is not None:
+        return plant.yaw_deg
+    return clip.root_at(plant.start, skel.dims["pelvis_height"])[1]
+
+
 def _leg_target(skel, clip: Clip, side: str, frame: int, notes: list[str]):
+    """(mode, ankle target or None, foot yaw or None)."""
     ankle_h = skel.dims["ankle_height"]
     for p in clip.plants:
         if p.side == side and p.start <= frame <= p.end:
-            return "plant", np.array([*p.xy, ankle_h])
+            return "plant", np.array([*p.xy, ankle_h]), _plant_yaw(skel, clip, p)
     for s in clip.swings:
         if s.side == side and s.start <= frame <= s.end:
             before = [p for p in clip.plants if p.side == side and p.end <= s.start]
@@ -40,13 +48,13 @@ def _leg_target(skel, clip: Clip, side: str, frame: int, notes: list[str]):
                 missing, which = ("before", "starts") if not before else ("after", "ends")
                 notes.append(f"{side} swing {s.start}-{s.end} has no plant {missing}; the leg follows keys "
                              f"until you add the plant that {which} the swing")
-                return "keys", None
-            a = max(before, key=lambda p: p.end).xy
-            b = min(after, key=lambda p: p.start).xy
+                return "keys", None, None
+            pa, pb = max(before, key=lambda p: p.end), min(after, key=lambda p: p.start)
             t = (frame - s.start) / (s.end - s.start)
-            xy = np.asarray(a) + t * (np.asarray(b) - np.asarray(a))
-            return "swing", np.array([*xy, ankle_h + s.apex_m * 4 * t * (1 - t)])
-    return "keys", None
+            xy = np.asarray(pa.xy) + t * (np.asarray(pb.xy) - np.asarray(pa.xy))
+            ya, yb = _plant_yaw(skel, clip, pa), _plant_yaw(skel, clip, pb)
+            return "swing", np.array([*xy, ankle_h + s.apex_m * 4 * t * (1 - t)]), ya + t * (yb - ya)
+    return "keys", None, None
 
 
 def evaluate_frame(skel, clip: Clip, frame: int) -> FrameState:
@@ -62,11 +70,11 @@ def evaluate_frame(skel, clip: Clip, frame: int) -> FrameState:
     modes: dict[str, str] = {}
     iks: dict[str, LegIKResult | None] = {}
     for side in ("left", "right"):
-        mode, target = _leg_target(skel, clip, side, frame, notes)
+        mode, target, yaw = _leg_target(skel, clip, side, frame, notes)
         modes[side], iks[side] = mode, None
         if target is None:
             continue
-        ik = solve_leg(skel, side, position, heading, target)
+        ik = solve_leg(skel, side, position, heading, target, yaw)
         iks[side] = ik
         rotations[f"{side}_hip"] = ik.hip_local
         rotations[f"{side}_knee"] = skel.angles_to_quat(f"{side}_knee", {"flexion": ik.knee_flexion_deg})

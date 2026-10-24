@@ -41,6 +41,7 @@ class Plant:
     start: int
     end: int
     xy: tuple[float, float]  # world position of the ankle's ground projection
+    yaw_deg: float | None = None  # the foot's heading; None = the root heading at `start`, resolved live
 
 
 @dataclass(frozen=True)

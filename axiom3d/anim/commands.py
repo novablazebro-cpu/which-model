@@ -11,6 +11,7 @@ from axiom3d.conventions import track_to_world
 SIDES = ("left", "right")
 OPS = ("set_root", "set_pose", "plant_foot", "swing_foot")
 MIN_APEX = 0.03
+MAX_ANGLE = 720.0
 
 
 class CommandError(ValueError):
@@ -128,8 +129,13 @@ def _plant(skel, clip: Clip, cmd: dict) -> None:
     sign = 1.0 if side == "left" else -1.0
     forward = _num(cmd["forward"], "forward") if cmd.get("forward") is not None else 0.0
     left = _num(cmd["left"], "left") if cmd.get("left") is not None else sign * skel.dims["hip_half_width"]
+    yaw = None
+    if cmd.get("facing") is not None:
+        yaw = _num(cmd["facing"], "facing")
+        if abs(yaw) > MAX_ANGLE:
+            raise CommandError(f"facing must be within -{MAX_ANGLE:g}..{MAX_ANGLE:g} degrees, got {yaw}")
     x, y = track_to_world(clip.track, forward, left)
-    clip.plants.append(Plant(side, start, end, (float(x), float(y))))
+    clip.plants.append(Plant(side, start, end, (float(x), float(y)), yaw))
 
 
 def _swing(clip: Clip, cmd: dict) -> None:

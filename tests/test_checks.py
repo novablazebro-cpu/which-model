@@ -209,3 +209,25 @@ def test_chained_swings_rejected(skel):
     from axiom3d.anim.commands import CommandError
     with pytest.raises(CommandError, match="overlap"):
         ctx_for(skel, "walk_forward", [swing("left", 3, 9), swing("left", 9, 15)])
+
+
+def test_pivot_in_place_fails_with_step_turn_hint(skel):
+    cmds = [{"op": "set_root", "frame": 0, "heading": 0, "height": 0.9}, {"op": "set_root", "frame": 24, "heading": 90},
+            plant("right", 0, 24), plant("left", 0, 24)]
+    res = [r for r in run_checks(ctx_for(skel, "step_forward", cmds)) if r.id == "anatomy.joint_limits"
+           and "internal_rotation" in r.message]
+    assert res and "step-turn" in res[0].hint
+
+
+def test_turning_steps_not_flagged_backward(skel):
+    found = ids(run_checks(ctx_for(skel, "turn_then_step", reference_commands("turn_then_step"))))
+    assert "gait.step_direction" not in found and "gait.foot_slide" not in found
+
+
+def test_foot_slide_measures_toe_and_heel(skel):
+    # A foot that pivots about its ankle while "planted" must count as sliding (the ankle alone doesn't move).
+    ctx = ctx_for(skel, "step_forward", reference_commands("step_forward"))
+    states = copy.deepcopy(ctx.states)
+    for s in states:
+        s.points["right_toe"] = s.points["right_toe"] + np.array([0.004 * s.frame, 0.0, 0.0])
+    assert "gait.foot_slide" in ids(run_checks(dataclasses.replace(ctx, states=states)), "error")

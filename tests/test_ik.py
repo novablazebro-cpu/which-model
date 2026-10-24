@@ -63,3 +63,18 @@ def test_straight_down_rest_is_reached(skel):
     r = solve_leg(skel, "left", pel, 0, tgt)
     assert r.reached and abs(r.knee_flexion_deg) < 0.1
     assert abs(skel.quat_to_angles("left_hip", r.hip_local)["flexion"]) < 0.1
+
+
+def test_knee_over_toes_with_foot_yaw(skel):
+    # Review I5 / v2: a planted foot keeps its own heading; the knee tracks over the toes.
+    import math
+    pel = np.array([0, 0, 0.88])
+    tgt = np.array([0.0875, -0.05, skel.dims["ankle_height"]])
+    r = solve_leg(skel, "left", pel, 0, tgt, foot_yaw_deg=30)
+    p = fk_leg(skel, "left", r, pel, 0)
+    assert r.reached and np.allclose(p["left_ankle"], tgt, atol=1e-6)
+    fwd30 = np.array([math.sin(math.radians(30)), -math.cos(math.radians(30)), 0])
+    assert (p["left_knee"] - p["left_hip"]) @ fwd30 > 0.02
+    d = p["left_toe"][:2] - p["left_heel"][:2]
+    assert abs(math.degrees(math.atan2(d[0], -d[1])) - 30) < 2      # toes point along yaw 30
+    assert abs(p["left_toe"][2]) < 0.005 and abs(p["left_heel"][2]) < 0.005

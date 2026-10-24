@@ -20,6 +20,16 @@ straight leg only reaches straight down. For any step, **lower the pelvis**:
   knee is nearly straight. A constant low pelvis gives a crouched walk.
 If `anatomy.ik_unreachable` fires, lower the root or put the plant nearer the hip.
 
+## Turning
+A planted foot keeps its heading (the direction its toes point) for as long as it's planted.
+Turning the body more than about 40 deg over a planted foot overloads the hip
+(`anatomy.joint_limits` on `internal_rotation`), so turn with **step-turns**:
+1. Turn the body at most about 35 deg while both feet are planted.
+2. Swing one foot and plant it facing further into the turn: `plant_foot(..., facing=70)`.
+3. Turn the body again, then step the other foot to the new heading.
+
+Without `facing`, a plant points the toes along the body's heading at the plant's first frame.
+
 ## Reference angles (adult walking)
 - Hip flexion: about +30 deg at heel contact, about -10 deg at push-off.
 - Knee flexion: about 5-15 deg at mid-stance, about 60 deg peak in swing.

@@ -367,9 +367,9 @@ class Workbench:
 
     @_locked
     def plant_foot(self, side, start, end, forward=None, left=None, expect=None, dry_run: bool = False,
-                   session: str | None = None) -> ToolResult:
+                   facing=None, session: str | None = None) -> ToolResult:
         cmd = {"op": "plant_foot", "side": side, "start": start, "end": end}
-        cmd.update({k: v for k, v in (("forward", forward), ("left", left)) if v is not None})
+        cmd.update({k: v for k, v in (("forward", forward), ("left", left), ("facing", facing)) if v is not None})
         return self._edit(cmd, expect, session, dry_run)
 
     @_locked
