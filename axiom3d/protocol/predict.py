@@ -1,0 +1,275 @@
+"""A small, safe prediction language. The model states what it expects; the tool measures.
+
+Grammar (case-insensitive):
+  <subject> (< | > | <= | >=) <number | subject>
+  <subject> ~= <number> ± <tolerance>          (also +- or +/-)
+  <subject> in [<low>, <high>]
+  <point> (in_front_of | behind | left_of | right_of | above | below) <point>
+  <point> on_ground
+  subjects: <point>.(x|y|z|height|forward|left), root.(x|y|z|height|forward|left|heading),
+            <channel> such as left_hip.flexion, (slide|min_height|max_height)(<point>)
+  frames:   optional @N, @A..B or @all (after the subject or at the end)
+"""
+
+from __future__ import annotations
+
+import difflib
+import re
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from axiom3d.conventions import CONTACT_EPS
+from axiom3d.measure import relation, track_coords
+
+POINT_ATTRS = ("x", "y", "z", "height", "forward", "left")
+ROOT_ATTRS = POINT_ATTRS + ("heading",)
+RELATIONS = ("in_front_of", "behind", "left_of", "right_of", "above", "below")
+METRICS = ("slide", "min_height", "max_height")
+PRECISE_M = 0.15
+PRECISE_DEG = 20.0
+PRECISE_SLIDE = 0.05
+
+_NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?"
+_NAME = r"[a-z_]+(?:\.[a-z_]+)?"
+_METRIC = r"(?:slide|min_height|max_height)\(\s*[a-z_]+\s*\)"
+_SUBJ = rf"(?:{_METRIC}|{_NAME})"
+_FRAMES = re.compile(r"@\s*(all|\d+\s*\.\.\s*\d+|\d+)")
+
+
+class PredictionError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class Subject:
+    kind: str  # "point" | "root" | "channel" | "metric"
+    name: str
+    attr: str | None = None
+
+
+@dataclass(frozen=True)
+class Frames:
+    kind: str = "default"  # "default" | "one" | "range" | "all"
+    a: int | None = None
+    b: int | None = None
+
+
+@dataclass(frozen=True)
+class Prediction:
+    kind: str  # "compare" | "relation" | "metric"
+    op: str
+    subject: Subject | None = None
+    other: Subject | None = None
+    value: float | None = None
+    tol: float | None = None
+    low: float | None = None
+    high: float | None = None
+    point: str | None = None
+    other_point: str | None = None
+    frames: Frames = Frames()
+    text: str = field(default="", compare=False)
+
+
+@dataclass
+class Outcome:
+    passed: bool
+    measured: str
+
+
+def _normalize(text: str) -> str:
+    t = text.replace("−", "-").replace("+/-", "±").replace("+-", "±").lower()
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _suggest(bad: str, candidates: list[str]) -> str:
+    close = difflib.get_close_matches(bad, candidates, n=10, cutoff=0.3)
+    return ", ".join(close or candidates[:10])
+
+
+def _point(name: str, skel) -> str:
+    if name not in skel.point_names():
+        raise PredictionError(f"unknown point {name!r}; closest: {_suggest(name, skel.point_names())}")
+    return name
+
+
+def _subject(token: str, skel) -> Subject:
+    m = re.fullmatch(r"(slide|min_height|max_height)\(\s*([a-z_]+)\s*\)", token)
+    if m:
+        return Subject("metric", m.group(1), _point(m.group(2), skel))
+    head, _, attr = token.partition(".")
+    if not attr:
+        raise PredictionError(f"{token!r} needs an attribute, e.g. {token}.z or {token}.forward")
+    if head == "root" and attr in ROOT_ATTRS:
+        return Subject("root", "root", attr)
+    if token in skel.channels():
+        return Subject("channel", token)
+    if head in skel.point_names() and attr in POINT_ATTRS:
+        return Subject("point", head, attr)
+    candidates = skel.channels() + [f"root.{a}" for a in ROOT_ATTRS] + [
+        f"{p}.{a}" for p in skel.point_names() for a in POINT_ATTRS
+    ]
+    raise PredictionError(f"unknown subject {token!r}; closest: {_suggest(token, candidates)}")
+
+
+def _frames(text: str) -> tuple[str, Frames]:
+    found = _FRAMES.findall(text)
+    if len(found) > 1:
+        raise PredictionError("use at most one frame selector (@N, @A..B or @all)")
+    if not found:
+        return text, Frames()
+    sel = found[0].replace(" ", "")
+    text = _FRAMES.sub(" ", text, count=1)
+    text = re.sub(r"\s+", " ", text).strip()
+    if sel == "all":
+        return text, Frames("all")
+    if ".." in sel:
+        a, b = (int(x) for x in sel.split(".."))
+        if a > b:
+            raise PredictionError(f"frame range @{a}..{b} runs backward")
+        return text, Frames("range", a, b)
+    return text, Frames("one", int(sel))
+
+
+def parse_prediction(text: str, skel) -> Prediction:
+    if not isinstance(text, str) or not text.strip():
+        raise PredictionError("empty prediction")
+    body, frames = _frames(_normalize(text))
+    m = re.fullmatch(r"([a-z_]+) on_ground", body)
+    if m:
+        return Prediction("relation", "on_ground", point=_point(m.group(1), skel), frames=frames, text=text)
+    m = re.fullmatch(rf"([a-z_]+) ({'|'.join(RELATIONS)}) ([a-z_]+)", body)
+    if m:
+        return Prediction("relation", m.group(2), point=_point(m.group(1), skel),
+                          other_point=_point(m.group(3), skel), frames=frames, text=text)
+    m = re.fullmatch(rf"({_SUBJ}) in \[\s*({_NUM})\s*,\s*({_NUM})\s*\]", body)
+    if m:
+        subj, low, high = _subject(m.group(1), skel), float(m.group(2)), float(m.group(3))
+        if low > high:
+            raise PredictionError(f"range [{low}, {high}] is backward")
+        return Prediction(_kind(subj), "in", subj, low=low, high=high, frames=frames, text=text)
+    m = re.fullmatch(rf"({_SUBJ}) ?~= ?({_NUM}) ?± ?({_NUM})", body)
+    if m:
+        subj = _subject(m.group(1), skel)
+        tol = abs(float(m.group(3)))
+        return Prediction(_kind(subj), "~=", subj, value=float(m.group(2)), tol=tol, frames=frames, text=text)
+    m = re.fullmatch(rf"({_SUBJ}) ?(<=|>=|<|>) ?({_NUM})", body)
+    if m:
+        subj = _subject(m.group(1), skel)
+        return Prediction(_kind(subj), m.group(2), subj, value=float(m.group(3)), frames=frames, text=text)
+    m = re.fullmatch(rf"({_SUBJ}) ?(<=|>=|<|>) ?({_SUBJ})", body)
+    if m:
+        subj, other = _subject(m.group(1), skel), _subject(m.group(3), skel)
+        return Prediction("compare", m.group(2), subj, other=other, frames=frames, text=text)
+    raise PredictionError(
+        f"can't parse {text!r}. Examples: 'left_toe.forward ~= 0.36 ± 0.05', 'left_toe in_front_of pelvis @24', "
+        "'slide(right_heel) < 0.02', 'left_knee.flexion in [10, 40] @12'"
+    )
+
+
+def _kind(subj: Subject) -> str:
+    return "metric" if subj.kind == "metric" else "compare"
+
+
+def _is_angle(subj: Subject) -> bool:
+    return subj.kind == "channel" or (subj.kind == "root" and subj.attr == "heading")
+
+
+def is_precise(p: Prediction) -> bool:
+    if p.kind == "relation" or p.other is not None:
+        return True
+    limit = PRECISE_DEG if _is_angle(p.subject) else PRECISE_M
+    if p.op == "~=":
+        return p.tol <= limit
+    if p.op == "in":
+        return p.high - p.low <= limit
+    if p.kind == "metric" and p.subject.name == "slide" and p.op in ("<", "<="):
+        return p.value <= PRECISE_SLIDE
+    return False
+
+
+def _select(frames: Frames, states, default_frame: int, metric: bool) -> list:
+    first, last = states[0].frame, states[-1].frame
+    if frames.kind == "default":
+        wanted = list(range(first, last + 1)) if metric else [default_frame]
+    elif frames.kind == "all":
+        wanted = list(range(first, last + 1))
+    elif frames.kind == "one":
+        wanted = [frames.a]
+    else:
+        wanted = list(range(frames.a, frames.b + 1))
+    if wanted[0] < first or wanted[-1] > last:
+        raise PredictionError(f"frames must be within {first}..{last}")
+    return [states[f - first] for f in wanted]
+
+
+def _value(subj: Subject, state, clip) -> float:
+    if subj.kind == "channel":
+        return float(state.angles[subj.name])
+    p = state.root_position if subj.kind == "root" else state.points[subj.name]
+    if subj.attr == "heading":
+        return float(state.heading_deg)
+    if subj.attr in ("forward", "left"):
+        f, l = track_coords(clip, p[:2])
+        return f if subj.attr == "forward" else l
+    return float(p["xyz".index(subj.attr)] if subj.attr in ("x", "y", "z") else p[2])
+
+
+def _metric(subj: Subject, chosen) -> float:
+    pts = np.array([s.points[subj.attr] for s in chosen])
+    if subj.name == "slide":
+        return float(np.max(np.linalg.norm(pts[:, :2] - pts[0, :2], axis=1)))
+    return float(pts[:, 2].min() if subj.name == "min_height" else pts[:, 2].max())
+
+
+def _label(subj: Subject) -> str:
+    if subj.kind == "metric":
+        return f"{subj.name}({subj.attr})"
+    return subj.name if subj.kind == "channel" else f"{subj.name}.{subj.attr}"
+
+
+def _holds(op: str, v: float, p: Prediction, other: float | None = None) -> bool:
+    target = other if other is not None else p.value
+    if op == "~=":
+        return abs(v - p.value) <= p.tol
+    if op == "in":
+        return p.low <= v <= p.high
+    return {"<": v < target, ">": v > target, "<=": v <= target, ">=": v >= target}[op]
+
+
+_REL_TEXT = {
+    "in_front_of": ("forward", 1, "in front of", "behind"),
+    "behind": ("forward", -1, "in front of", "behind"),
+    "left_of": ("left", 1, "left of", "right of"),
+    "right_of": ("left", -1, "left of", "right of"),
+    "above": ("up", 1, "above", "below"),
+    "below": ("up", -1, "above", "below"),
+}
+
+
+def evaluate_prediction(p: Prediction, skel, clip, states, default_frame: int) -> Outcome:
+    chosen = _select(p.frames, states, default_frame, metric=p.kind == "metric")
+    if p.kind == "metric":
+        v = _metric(p.subject, chosen)
+        span = f"{chosen[0].frame}..{chosen[-1].frame}"
+        return Outcome(_holds(p.op, v, p), f"{_label(p.subject)} = {v:.3f} over frames {span}")
+    for s in chosen:
+        if p.kind == "relation":
+            if p.op == "on_ground":
+                z = float(s.points[p.point][2])
+                ok, measured = z <= CONTACT_EPS, f"{p.point} is {z:.3f} m above the ground @{s.frame}"
+            else:
+                key, sign, pos, neg = _REL_TEXT[p.op]
+                d = relation(s, p.point, p.other_point)[key]
+                ok = sign * d > 0
+                measured = f"{p.point} is {abs(d):.3f} m {pos if d >= 0 else neg} {p.other_point} @{s.frame}"
+        else:
+            v = _value(p.subject, s, clip)
+            other = _value(p.other, s, clip) if p.other is not None else None
+            ok = _holds(p.op, v, p, other)
+            measured = f"{_label(p.subject)} = {v:.3f} @{s.frame}"
+            if other is not None:
+                measured += f", {_label(p.other)} = {other:.3f}"
+        if not ok:
+            return Outcome(False, measured)
+    return Outcome(True, measured)
