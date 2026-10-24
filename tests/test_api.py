@@ -242,3 +242,17 @@ def test_calc_tool_and_variables_in_edits(home):
 def test_calc_in_bare_mode(home):
     wb = started(home, protocol=False)
     assert "= 0.068" in wb.calc("left_ankle.z").text
+
+
+def test_edit_result_includes_numeric_diff(home):
+    wb = started(home)
+    pass_quiz(wb, home)
+    res = wb.set_pose(frame=12, angles={"left_knee.flexion": -20}, expect=["left_knee.flexion@12 ~= -20 ± 1"])
+    assert "CHANGED:" in res.text and "left_knee.flexion" in res.text and "NEW anatomy.joint_limits" in res.text
+
+
+def test_swing_before_landing_plant_explains_itself(home):
+    wb = started(home, protocol=False)
+    wb.plant_foot(side="left", start=0, end=6)
+    res = wb.swing_foot(side="left", start=6, end=18)
+    assert "add the plant that ends the swing" in res.text

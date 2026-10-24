@@ -37,8 +37,9 @@ def _leg_target(skel, clip: Clip, side: str, frame: int, notes: list[str]):
             before = [p for p in clip.plants if p.side == side and p.end <= s.start]
             after = [p for p in clip.plants if p.side == side and p.start >= s.end]
             if not before or not after:
-                missing = "before" if not before else "after"
-                notes.append(f"{side} swing {s.start}-{s.end} has no plant {missing}; using keys")
+                missing, which = ("before", "starts") if not before else ("after", "ends")
+                notes.append(f"{side} swing {s.start}-{s.end} has no plant {missing}; the leg follows keys "
+                             f"until you add the plant that {which} the swing")
                 return "keys", None
             a = max(before, key=lambda p: p.end).xy
             b = min(after, key=lambda p: p.start).xy

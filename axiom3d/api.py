@@ -13,6 +13,7 @@ from axiom3d.anim.commands import CommandError, apply_command
 from axiom3d.anim.evaluate import evaluate_clip
 from axiom3d.checks.base import CheckContext, run_checks
 from axiom3d.conventions import CONVENTIONS_TEXT
+from axiom3d.perceive.diff import describe_diff
 from axiom3d.perceive.render import render_filmstrip, render_footprints, render_sheet, to_png
 from axiom3d.perceive.report import describe_frame, describe_timeline
 from axiom3d.protocol.briefing import Question, grade_quiz
@@ -322,6 +323,7 @@ class Workbench:
         notes = states[frame - states[0].frame].notes
         if notes:
             lines.append("NOTES: " + " | ".join(notes))
+        lines += describe_diff(self.skel, get_task(st.task_id).kind, (before, states_before), (clip, states), frame)
         save(st, self.home)
         return ToolResult(self._finish_text(st, lines, clip, states))
 
