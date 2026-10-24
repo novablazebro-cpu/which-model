@@ -39,9 +39,11 @@ math; it was missing information.** So axiom3d does that math itself.
    rotations: `left_hip.flexion = +30` always moves the leg forward.
    `plant_foot` pins a foot and the tool solves the leg with IK every frame.
 2. **The model predicts; the tool grades.** Every edit must carry a precise
-   prediction (`left_toe in_front_of pelvis`, `left_ankle.forward ~= 0.36 ± 0.05`).
-   The tool measures and shows PASS or FAIL. A failed prediction blocks further
-   edits until the model calls `undo` or `accept_discrepancy(reason)`.
+   prediction (`left_toe in_front_of pelvis`, `left_ankle.forward ~= 0.36 ± 0.05`)
+   about something the edit actually changes. Tautologies and true-but-unaffected
+   statements don't count. The tool measures and shows PASS or FAIL. A failed
+   prediction blocks further edits until the model calls `undo` or
+   `accept_discrepancy(reason)`.
 3. **Text first, images second.** Every number comes with a meaning the tool
    computed: `left_toe ... IN FRONT of pelvis by 0.31 m, ON ground`. Images are
    extra: front, side, top and perspective views, filmstrips and footprint maps,
@@ -80,6 +82,7 @@ uvx --from git+https://github.com/novablazebro-cpu/which-model axiom3d tasks
 ## Connect a model (MCP)
 
 Use a fixed `--home` so sessions don't land in whatever directory the client starts in.
+Each server works only on the session it started, so several clients can share one home.
 
 **Claude Code**
 ```bash
@@ -139,8 +142,9 @@ lowers, and `check` says so. A full solution for each task is in
 Checks:
 - **Geometry:** ground penetration, floating.
 - **Anatomy:** joint limits, IK reach.
-- **Gait:** support, foot slide, moonwalk, step direction (backswing), alternation,
-  arm counter-swing, loop continuity, root progression.
+- **Gait:** support, foot slide, moonwalk, step direction (backswing), laterality
+  (crossed or swapped feet), alternation, arm counter-swing, loop continuity,
+  root progression.
 
 ## Evaluate
 
@@ -155,14 +159,20 @@ The bundled scripted agents (`axiom3d.eval.agents`) prove that the checks and ga
 
 ```
 correct      protocol=on  success 3/3  mean calibration 1.00
+mirrored     protocol=on  success 0/3  mean calibration 1.00
 naive        protocol=off success 0/3  mean calibration -
-naive        protocol=on  success 0/3  mean calibration 0.78
+naive        protocol=on  success 0/3  mean calibration 0.64
 ```
 
 The naive agent makes the classic errors: negative hip flexion to "step forward",
 keyed feet instead of plants, and accepting a failed prediction instead of fixing it.
 In bare mode it closes its session believing it is done. With the protocol on,
 the tool refuses to certify and says exactly why.
+
+The mirrored agent is the instructive one. It predicts its own edits perfectly
+(calibration 1.00) but has left and right swapped. **Calibration measures
+self-consistency, not correctness**, which is why certification rests on the
+tool's checks and not on the model's predictions.
 
 ## Honest limits
 
@@ -172,6 +182,10 @@ the tool refuses to certify and says exactly why.
   a hypothesis.** The A/B mode exists to measure it; it hasn't been measured yet.
 - **v1 has a simplified body:** rigid segments, flat-foot plants (no heel-strike
   or toe-off), one rig and three tasks. The renderer is diagnostic, not pretty.
+- **Planted feet pivot about the ankle with the body's heading.** In a turn,
+  the toes of a planted foot sweep around (about 0.3 m in `turn_then_step`)
+  and no check flags it yet. Real turns pivot on the ball of the foot or use
+  step-turns.
 - Gait reference angles are textbook approximations.
 
 ## Development
