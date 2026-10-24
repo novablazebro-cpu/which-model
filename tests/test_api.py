@@ -201,3 +201,25 @@ def test_swing_predictions_default_to_mid_swing(home):
     res = wb.swing_foot(side="left", start=6, end=18, apex=0.08, expect=["max_height(left_ankle) ~= 0.148 ± 0.01",
                                                                           "left_ankle.z ~= 0.148 ± 0.005"])
     assert res.text.count("PASS") == 2, res.text
+
+
+def test_parallel_edits_all_kept(home):
+    # Review I1: MCP runs sync tools in worker threads; concurrent edits must not overwrite each other.
+    from concurrent.futures import ThreadPoolExecutor
+    wb = started(home, protocol=False)
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        list(pool.map(lambda f: wb.set_pose(frame=f, angles={"left_shoulder.flexion": f}), range(12)))
+    st = load(current_id(home), home)
+    assert sorted(c["frame"] for c in st.commands) == list(range(12)) and st.ledger["edits"] == 12
+
+
+def test_server_workbench_only_sees_its_own_session(home):
+    # Review I2: two MCP servers sharing a home must not edit each other's sessions through home/current.
+    bare = Workbench(home, protocol=False, shared_current=False)
+    strict = Workbench(home, protocol=True, shared_current=False)
+    bare.start_session("step_forward")
+    with pytest.raises(AxiomError, match="start_session"):
+        strict.set_root(frame=0, height=0.9)
+    strict.start_session("step_forward")
+    bare.set_root(frame=0, height=0.9)
+    assert load(bare.session_id, home).commands and not load(strict.session_id, home).commands

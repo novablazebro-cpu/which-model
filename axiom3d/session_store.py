@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
 import secrets
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -54,8 +56,15 @@ def new_session(task_id: str, protocol: bool, label: str | None, home: Path, ske
 def save(state: SessionState, home: Path) -> None:
     path = _path(home, state.id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dataclasses.asdict(state), indent=1))
-    (Path(home) / "current").write_text(state.id)
+    _atomic_write(path, json.dumps(dataclasses.asdict(state), indent=1))
+    _atomic_write(Path(home) / "current", state.id)
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Readers never see a half-written file: write a sibling temp file, then rename over the target."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
 
 
 def load(session_id: str, home: Path) -> SessionState:

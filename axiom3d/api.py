@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -63,16 +65,33 @@ def _describe(cmd: dict) -> str:
     return f"{cmd['op']}({args})"
 
 
+def _locked(method):
+    """One tool call at a time per Workbench: MCP runs sync tools in worker threads."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class Workbench:
-    def __init__(self, home: Path, protocol: bool = True, label: str | None = None):
+    """All tools. `shared_current=False` (the MCP server) only ever touches sessions it started itself;
+    the CLI, one process per call, uses the shared home/current pointer instead."""
+
+    def __init__(self, home: Path, protocol: bool = True, label: str | None = None, shared_current: bool = True):
         self.home = Path(home)
         self.protocol = protocol
         self.label = label
+        self.shared_current = shared_current
+        self.session_id: str | None = None
         self.skel = build_mannequin()
+        self._lock = threading.RLock()
 
     # ---- helpers ---------------------------------------------------------------------------
     def _load(self, session: str | None):
-        sid = session or current_id(self.home)
+        sid = session or self.session_id or (current_id(self.home) if self.shared_current else None)
         if not sid:
             raise AxiomError("no session yet; call start_session first")
         try:
@@ -95,6 +114,7 @@ class Workbench:
         return "\n".join(lines)
 
     # ---- session -----------------------------------------------------------------------------
+    @_locked
     def start_session(self, task: str) -> ToolResult:
         try:
             spec = get_task(task)
@@ -102,6 +122,7 @@ class Workbench:
             raise AxiomError(e.args[0]) from None
         st = new_session(task, self.protocol, self.label, self.home, self.skel)
         save(st, self.home)
+        self.session_id = st.id
         lines = [
             f"SESSION {st.id}  task: {spec.title}",
             f"GOAL: {spec.goal}",
@@ -117,6 +138,7 @@ class Workbench:
                 lines.append(f"{q['id']}: {q['text']}{choices}")
         return ToolResult(self._finish_text(st, lines))
 
+    @_locked
     def answer_quiz(self, answers: dict, session: str | None = None) -> ToolResult:
         st = self._load(session)
         if not st.protocol:
@@ -138,6 +160,7 @@ class Workbench:
         save(st, self.home)
         return ToolResult(self._finish_text(st, lines))
 
+    @_locked
     def guide(self, topic: str) -> ToolResult:
         from axiom3d.guide import read_topic
 
@@ -164,6 +187,7 @@ class Workbench:
             out.append(int(x))
         return out
 
+    @_locked
     def observe(self, frames=None, views=None, session: str | None = None) -> ToolResult:
         st = self._load(session)
         clip, states = rebuild(st, self.skel)
@@ -191,6 +215,7 @@ class Workbench:
             lines.append("IMAGES: " + ", ".join(label for label, _ in images) + " (blue = LEFT, orange = RIGHT)")
         return ToolResult(self._finish_text(st, lines, clip, states), images)
 
+    @_locked
     def check(self, session: str | None = None) -> ToolResult:
         st = self._load(session)
         clip, states = rebuild(st, self.skel)
@@ -284,6 +309,7 @@ class Workbench:
         save(st, self.home)
         return ToolResult(self._finish_text(st, lines, clip, states))
 
+    @_locked
     def set_root(self, frame, forward=None, left=None, height=None, heading=None, expect=None,
                  session: str | None = None) -> ToolResult:
         cmd = {"op": "set_root", "frame": frame}
@@ -291,19 +317,23 @@ class Workbench:
                     if v is not None})
         return self._edit(cmd, expect, session)
 
+    @_locked
     def set_pose(self, frame, angles: dict, expect=None, session: str | None = None) -> ToolResult:
         return self._edit({"op": "set_pose", "frame": frame, "angles": angles}, expect, session)
 
+    @_locked
     def plant_foot(self, side, start, end, forward=None, left=None, expect=None, session: str | None = None) -> ToolResult:
         cmd = {"op": "plant_foot", "side": side, "start": start, "end": end}
         cmd.update({k: v for k, v in (("forward", forward), ("left", left)) if v is not None})
         return self._edit(cmd, expect, session)
 
+    @_locked
     def swing_foot(self, side, start, end, apex=0.08, expect=None, session: str | None = None) -> ToolResult:
         return self._edit({"op": "swing_foot", "side": side, "start": start, "end": end, "apex": apex},
                           expect, session)
 
     # ---- recovery ------------------------------------------------------------------------------
+    @_locked
     def undo(self, session: str | None = None) -> ToolResult:
         st = self._load(session)
         if st.phase == "DONE":
@@ -316,6 +346,7 @@ class Workbench:
         save(st, self.home)
         return ToolResult(self._finish_text(st, [f"UNDONE: {_describe(cmd)}"]))
 
+    @_locked
     def accept_discrepancy(self, reason: str, session: str | None = None) -> ToolResult:
         st = self._load(session)
         if not st.pending_discrepancy:
@@ -329,6 +360,7 @@ class Workbench:
         return ToolResult(self._finish_text(st, [f"ACCEPTED (failed: {'; '.join(failed)}). Reason recorded: {reason.strip()}"]))
 
     # ---- ending --------------------------------------------------------------------------------
+    @_locked
     def finish(self, claims=None, session: str | None = None) -> ToolResult:
         st = self._load(session)
         if st.phase == "DONE":
@@ -366,6 +398,7 @@ class Workbench:
         save(st, self.home)
         return ToolResult(self._finish_text(st, lines, clip, states))
 
+    @_locked
     def export(self, session: str | None = None) -> ToolResult:
         from axiom3d.export.gltf import export_glb
 

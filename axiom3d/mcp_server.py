@@ -26,7 +26,8 @@ def _reply(call) -> list | str:
 
 
 def build_server(home: Path, protocol: bool = True, label: str | None = None) -> MCPServer:
-    wb = Workbench(home, protocol=protocol, label=label)
+    # Each server works only on the session it started, never on another server's via home/current.
+    wb = Workbench(home, protocol=protocol, label=label, shared_current=False)
     server = MCPServer("axiom3d", instructions=INSTRUCTIONS)
     tool = server.tool(structured_output=False)
 
