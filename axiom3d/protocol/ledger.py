@@ -18,6 +18,8 @@ def new_ledger(label: str | None, task: str, protocol: bool) -> dict:
         "undos": 0,
         "accepted_discrepancies": 0,
         "exam_attempts": 0,
+        "dry_runs": 0,
+        "batches": 0,
         "certified": None,
         "task_success": None,
     }

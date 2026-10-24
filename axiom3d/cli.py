@@ -13,7 +13,7 @@ from axiom3d.session_store import current_id
 from axiom3d.tasks.library import TASKS
 
 TOOLS = ("start_session", "answer_quiz", "guide", "observe", "check", "calc", "set_root", "set_pose", "plant_foot",
-         "swing_foot", "undo", "accept_discrepancy", "finish", "export")
+         "swing_foot", "batch", "undo", "accept_discrepancy", "finish", "export")
 NO_SESSION = ("start_session", "guide")
 
 

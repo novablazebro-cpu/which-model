@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import functools
+import hashlib
+import json
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,7 +52,10 @@ class ToolResult:
 
 
 def _prediction_frame(cmd: dict) -> int:
-    """Where an edit's predictions are measured by default: the keyed frame, a plant's last frame, mid-swing."""
+    """Where an edit's predictions are measured by default: the keyed frame, a plant's last frame, mid-swing.
+    A batch uses its last edit's frame."""
+    if cmd["op"] == "batch":
+        return _prediction_frame(cmd["edits"][-1])
     if cmd["op"] in ("set_root", "set_pose"):
         return int(float(cmd["frame"]))
     if cmd["op"] == "swing_foot":
@@ -63,6 +68,8 @@ def _same_scene(a, b) -> bool:
 
 
 def _describe(cmd: dict) -> str:
+    if cmd["op"] == "batch":
+        return f"batch({len(cmd['edits'])} edits: {', '.join(e['op'] for e in cmd['edits'])})"
     args = ", ".join(f"{k}={v}" for k, v in cmd.items() if k != "op")
     return f"{cmd['op']}({args})"
 
@@ -250,13 +257,13 @@ class Workbench:
         return ToolResult(self._finish_text(st, lines, clip, states))
 
     # ---- editing -------------------------------------------------------------------------------
-    def _edit(self, cmd: dict, expect, session: str | None) -> ToolResult:
+    def _edit(self, cmd: dict, expect, session: str | None, dry_run: bool = False) -> ToolResult:
         st = self._load(session)
         if st.phase == "DONE":
             raise AxiomError("Session is finished; start a new one.")
         if st.protocol and st.phase == "BRIEFING":
             raise AxiomError("Pass the briefing quiz first: call answer_quiz.")
-        if st.protocol and st.pending_discrepancy:
+        if st.protocol and st.pending_discrepancy and not dry_run:
             raise AxiomError(
                 "Your last edit broke a prediction. Before editing again, call undo() to revert it, or "
                 "accept_discrepancy(reason) to keep it and say why your prediction was wrong."
@@ -300,20 +307,37 @@ class Workbench:
                 f"(@{frame}) or at another frame it affects. {EXPECT_HELP}"
             )
 
-        st.commands.append(cmd)
-        st.ledger["edits"] += 1
-        lines = [f"APPLIED: {_describe(cmd)}"]
+        key = hashlib.sha256(json.dumps(cmd, sort_keys=True, default=str).encode()).hexdigest()
+        seen = key in st.sandbox_seen and not dry_run
+        if dry_run:
+            st.ledger["dry_runs"] = st.ledger.get("dry_runs", 0) + 1
+            st.sandbox_seen = (st.sandbox_seen + [key])[-50:]
+            lines = ["DRY RUN: nothing changed. To apply, repeat the call with dry_run=false."]
+        else:
+            st.commands.append(cmd)
+            st.ledger["edits"] += 1
+            if cmd["op"] == "batch":
+                st.ledger["batches"] = st.ledger.get("batches", 0) + 1
+            lines = [f"APPLIED: {_describe(cmd)}"]
         if graded:
             # A true prediction about something the edit didn't touch carries no information; it isn't counted.
-            counted = [(p, o) for p, o, changed in graded if changed or not o.passed]
+            # Neither is one already graded on this exact edit in the sandbox.
+            counted = [] if seen else [(p, o) for p, o, changed in graded if changed or not o.passed]
             st.ledger["predictions_total"] += len(counted)
             st.ledger["predictions_correct"] += sum(o.passed for _, o in counted)
             lines.append("PREDICTIONS (measured by the tool):")
             for p, o, changed in graded:
-                status = ("PASS" if o.passed else "FAIL") if changed or not o.passed else "UNCHANGED (true but not affected by this edit; not counted)"
+                if seen:
+                    status = f"{'PASS' if o.passed else 'FAIL'} (seen in sandbox; not counted)"
+                elif changed or not o.passed:
+                    status = "PASS" if o.passed else "FAIL"
+                else:
+                    status = "UNCHANGED (true but not affected by this edit; not counted)"
                 lines.append(f"  {status}  {p.text}   (measured: {o.measured})")
             failed = [p.text for p, o, _ in graded if not o.passed]
-            if failed:
+            if failed and dry_run:
+                lines.append("Your prediction failed in the sandbox. Nothing was applied, so nothing is blocked.")
+            elif failed:
                 st.ledger["discrepancies"] += 1
                 st.pending_discrepancy = {"command": len(st.commands) - 1, "failed": failed}
                 lines.append(
@@ -325,30 +349,41 @@ class Workbench:
             lines.append("NOTES: " + " | ".join(notes))
         lines += describe_diff(self.skel, get_task(st.task_id).kind, (before, states_before), (clip, states), frame)
         save(st, self.home)
+        if dry_run:  # the status line describes the real, unchanged scene
+            return ToolResult(self._finish_text(st, lines, before, states_before))
         return ToolResult(self._finish_text(st, lines, clip, states))
 
     @_locked
     def set_root(self, frame, forward=None, left=None, height=None, heading=None, expect=None,
-                 session: str | None = None) -> ToolResult:
+                 dry_run: bool = False, session: str | None = None) -> ToolResult:
         cmd = {"op": "set_root", "frame": frame}
         cmd.update({k: v for k, v in (("forward", forward), ("left", left), ("height", height), ("heading", heading))
                     if v is not None})
-        return self._edit(cmd, expect, session)
+        return self._edit(cmd, expect, session, dry_run)
 
     @_locked
-    def set_pose(self, frame, angles: dict, expect=None, session: str | None = None) -> ToolResult:
-        return self._edit({"op": "set_pose", "frame": frame, "angles": angles}, expect, session)
+    def set_pose(self, frame, angles: dict, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:
+        return self._edit({"op": "set_pose", "frame": frame, "angles": angles}, expect, session, dry_run)
 
     @_locked
-    def plant_foot(self, side, start, end, forward=None, left=None, expect=None, session: str | None = None) -> ToolResult:
+    def plant_foot(self, side, start, end, forward=None, left=None, expect=None, dry_run: bool = False,
+                   session: str | None = None) -> ToolResult:
         cmd = {"op": "plant_foot", "side": side, "start": start, "end": end}
         cmd.update({k: v for k, v in (("forward", forward), ("left", left)) if v is not None})
-        return self._edit(cmd, expect, session)
+        return self._edit(cmd, expect, session, dry_run)
 
     @_locked
-    def swing_foot(self, side, start, end, apex=0.08, expect=None, session: str | None = None) -> ToolResult:
+    def swing_foot(self, side, start, end, apex=0.08, expect=None, dry_run: bool = False,
+                   session: str | None = None) -> ToolResult:
         return self._edit({"op": "swing_foot", "side": side, "start": start, "end": end, "apex": apex},
-                          expect, session)
+                          expect, session, dry_run)
+
+    @_locked
+    def batch(self, edits, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:
+        """Several edits applied together under one set of predictions; one undo reverts them all."""
+        if not isinstance(edits, list) or not edits:
+            raise AxiomError("batch needs a list of 1..40 edits, e.g. [{\"op\": \"plant_foot\", ...}, ...]")
+        return self._edit({"op": "batch", "edits": edits}, expect, session, dry_run)
 
     # ---- recovery ------------------------------------------------------------------------------
     @_locked

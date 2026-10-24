@@ -63,25 +63,32 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
 
     @tool
     def set_root(frame: int, forward: float | None = None, left: float | None = None, height: float | None = None,
-                 heading: float | None = None, expect: list[str] | str | None = None) -> list | str:
-        """Key the pelvis at a frame: track forward/left (m), height (m), heading (deg). expect: predictions."""
-        return _reply(lambda: wb.set_root(frame, forward, left, height, heading, expect))
+                 heading: float | None = None, expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:
+        """Key the pelvis at a frame: track forward/left (m), height (m), heading (deg). dry_run=true tries it without applying."""
+        return _reply(lambda: wb.set_root(frame, forward, left, height, heading, expect, dry_run))
 
     @tool
-    def set_pose(frame: int, angles: dict[str, float], expect: list[str] | str | None = None) -> list | str:
-        """Key anatomical angles at a frame, e.g. {"left_shoulder.flexion": 15}. expect: predictions."""
-        return _reply(lambda: wb.set_pose(frame, angles, expect))
+    def set_pose(frame: int, angles: dict[str, float], expect: list[str] | str | None = None,
+                 dry_run: bool = False) -> list | str:
+        """Key anatomical angles at a frame, e.g. {"left_shoulder.flexion": 15}. dry_run=true tries it without applying."""
+        return _reply(lambda: wb.set_pose(frame, angles, expect, dry_run))
 
     @tool
     def plant_foot(side: str, start: int, end: int, forward: float | None = None, left: float | None = None,
-                   expect: list[str] | str | None = None) -> list | str:
+                   expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:
         """Pin a foot to the ground at track (forward, left) from start to end; the tool solves the leg."""
-        return _reply(lambda: wb.plant_foot(side, start, end, forward, left, expect))
+        return _reply(lambda: wb.plant_foot(side, start, end, forward, left, expect, dry_run))
 
     @tool
-    def swing_foot(side: str, start: int, end: int, apex: float = 0.08, expect: list[str] | str | None = None) -> list | str:
+    def swing_foot(side: str, start: int, end: int, apex: float = 0.08, expect: list[str] | str | None = None,
+                   dry_run: bool = False) -> list | str:
         """Carry a foot in an arc (apex in m) from the plant ending at start to the plant starting at end."""
-        return _reply(lambda: wb.swing_foot(side, start, end, apex, expect))
+        return _reply(lambda: wb.swing_foot(side, start, end, apex, expect, dry_run))
+
+    @tool
+    def batch(edits: list[dict], expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:
+        """Apply several edits at once, e.g. [{"op": "plant_foot", ...}, {"op": "swing_foot", ...}]; one undo reverts all."""
+        return _reply(lambda: wb.batch(edits, expect, dry_run))
 
     @tool
     def undo() -> list | str:

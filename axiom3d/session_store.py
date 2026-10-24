@@ -32,6 +32,7 @@ class SessionState:
     pending_discrepancy: dict | None = None
     ledger: dict = field(default_factory=dict)
     variables: dict = field(default_factory=dict)
+    sandbox_seen: list[str] = field(default_factory=list)
 
 
 def _path(home: Path, session_id: str) -> Path:

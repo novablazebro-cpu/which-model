@@ -54,7 +54,26 @@ def _overlaps(a0, a1, b0, b1, touching: bool) -> bool:
     return (a0 <= b1 and b0 <= a1) if touching else (a0 < b1 and b0 < a1)
 
 
+MAX_BATCH = 40
+
+
+def _apply_batch(skel, clip: Clip, edits) -> Clip:
+    if not isinstance(edits, list) or not 1 <= len(edits) <= MAX_BATCH:
+        raise CommandError(f"a batch needs a list of 1..{MAX_BATCH} edits")
+    for i, edit in enumerate(edits):
+        op = edit.get("op") if isinstance(edit, dict) else None
+        if op == "batch":
+            raise CommandError(f"batch edit #{i + 1}: a batch can't contain another batch")
+        try:
+            clip = apply_command(skel, clip, edit)
+        except CommandError as e:
+            raise CommandError(f"batch edit #{i + 1} ({op}): {e}") from None
+    return clip
+
+
 def apply_command(skel, clip: Clip, cmd: dict) -> Clip:
+    if isinstance(cmd, dict) and cmd.get("op") == "batch":
+        return _apply_batch(skel, clip, cmd.get("edits"))
     if not isinstance(cmd, dict) or cmd.get("op") not in OPS:
         raise CommandError(f"op must be one of {', '.join(OPS)}, got {cmd.get('op') if isinstance(cmd, dict) else cmd!r}")
     clip = copy.deepcopy(clip)
