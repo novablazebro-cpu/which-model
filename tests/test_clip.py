@@ -32,9 +32,25 @@ def test_root_linear_and_hold(skel):
         apply_command(skel, clip, {"op": "set_root", "frame": 30, "forward": 1})
 
 
-def test_heading_holds_before_first_key(skel):
-    clip = make(skel, [{"op": "set_root", "frame": 12, "heading": 90}])
-    assert evaluate_frame(skel, clip, 0).heading_deg == 90
+def test_channels_start_from_rest(skel):
+    # A key after the start ramps from the rest value instead of holding backward.
+    clip = make(skel, [{"op": "set_root", "frame": 12, "heading": 90},
+                       {"op": "set_pose", "frame": 12, "angles": {"left_hip.flexion": 30}}])
+    assert evaluate_frame(skel, clip, 0).heading_deg == 0
+    assert np.isclose(evaluate_frame(skel, clip, 6).heading_deg, 45)
+    assert np.isclose(evaluate_frame(skel, clip, 6).angles["left_hip.flexion"], 15)
+    assert np.isclose(evaluate_frame(skel, clip, 20).heading_deg, 90)
+
+
+def test_root_keys_are_order_independent(skel):
+    # Height-only keys must not pin forward/left (review I7): order of set_root calls can't change the motion.
+    cmds = reference_commands("step_forward")
+    roots = [c for c in cmds if c["op"] == "set_root"]
+    bob_first = [c for c in roots if "forward" not in c] + [c for c in roots if "forward" in c]
+    reordered = bob_first + [c for c in cmds if c["op"] != "set_root"]
+    a, b = evaluate_clip(skel, make(skel, cmds)), evaluate_clip(skel, make(skel, reordered))
+    for sa, sb in zip(a, b):
+        assert np.allclose(sa.root_position, sb.root_position, atol=1e-9), sa.frame
 
 
 def test_set_root_keeps_unspecified_fields(skel):

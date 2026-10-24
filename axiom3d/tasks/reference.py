@@ -77,7 +77,7 @@ _REFERENCE = {
     ],
     "turn_then_step": [
         {"op": "set_root", "frame": 0, "heading": 0, "height": 0.92},
-        {"op": "set_root", "frame": 12, "heading": 90, "height": 0.905},
+        {"op": "set_root", "frame": 12, "heading": 90, "height": 0.905, "left": 0.0},
         {"op": "set_root", "frame": 36, "left": 0.17, "height": 0.86},
         _bob(23, 0.90),
         _plant("right", 0, 36),

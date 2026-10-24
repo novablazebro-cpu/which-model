@@ -5,8 +5,8 @@ from __future__ import annotations
 import copy
 import math
 
-from axiom3d.anim.clip import Clip, Plant, PoseKey, RootKey, Swing
-from axiom3d.conventions import track_to_world, world_to_track
+from axiom3d.anim.clip import ROOT_CHANNELS, Clip, Plant, PoseKey, RootKey, Swing
+from axiom3d.conventions import track_to_world
 
 SIDES = ("left", "right")
 OPS = ("set_root", "set_pose", "plant_foot", "swing_foot")
@@ -71,25 +71,15 @@ def apply_command(skel, clip: Clip, cmd: dict) -> Clip:
 
 def _set_root(skel, clip: Clip, cmd: dict) -> None:
     frame = _frame(clip, cmd.get("frame"))
-    fields = [k for k in ("forward", "left", "height", "heading") if cmd.get(k) is not None]
-    if not fields:
+    values = {name: _num(cmd[name], name) for name in ROOT_CHANNELS if cmd.get(name) is not None}
+    if not values:
         raise CommandError("set_root needs at least one of forward, left, height, heading")
-    position, _ = clip.root_at(frame, skel.dims["pelvis_height"])
-    forward, left = world_to_track(clip.track, position[:2])
-    if cmd.get("forward") is not None:
-        forward = _num(cmd["forward"], "forward")
-    if cmd.get("left") is not None:
-        left = _num(cmd["left"], "left")
-    height = _num(cmd["height"], "height") if cmd.get("height") is not None else float(position[2])
-    if not 0.3 <= height <= 1.2 * skel.height:
+    height = values.get("height")
+    if height is not None and not 0.3 <= height <= 1.2 * skel.height:
         raise CommandError(f"height must be within 0.3..{1.2 * skel.height:.2f} m, got {height}")
-    x, y = track_to_world(clip.track, forward, left)
-    heading = _num(cmd["heading"], "heading") if cmd.get("heading") is not None else None
-    old = next((k for k in clip.root_keys if k.frame == frame), None)
-    if heading is None and old is not None:
-        heading = old.heading_deg
-    clip.root_keys = [k for k in clip.root_keys if k.frame != frame]
-    clip.root_keys.append(RootKey(frame, (float(x), float(y), height), heading))
+    for name, value in values.items():
+        clip.root_keys = [k for k in clip.root_keys if not (k.frame == frame and k.channel == name)]
+        clip.root_keys.append(RootKey(frame, name, value))
 
 
 def _set_pose(skel, clip: Clip, cmd: dict) -> None:

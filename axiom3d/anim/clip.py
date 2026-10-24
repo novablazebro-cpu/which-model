@@ -6,7 +6,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from axiom3d.conventions import TrackFrame
+from axiom3d.conventions import TrackFrame, track_to_world
+
+ROOT_CHANNELS = ("forward", "left", "height", "heading")
 
 
 @dataclass(frozen=True)
@@ -19,9 +21,11 @@ class Timeline:
 
 @dataclass(frozen=True)
 class RootKey:
+    """One root channel at one frame: forward/left are track metres, height metres, heading degrees."""
+
     frame: int
-    position: tuple[float, float, float] | None = None
-    heading_deg: float | None = None
+    channel: str
+    value: float
 
 
 @dataclass(frozen=True)
@@ -70,19 +74,23 @@ class Clip:
     plants: list[Plant] = field(default_factory=list)
     swings: list[Swing] = field(default_factory=list)
 
+    def _channel(self, keys: list[tuple[int, float]], frame: int, default: float) -> float:
+        """Linear over the keys. A channel starts at its rest value unless keyed at the start frame."""
+        if not keys:
+            return default
+        if min(f for f, _ in keys) > self.timeline.start:
+            keys = [(self.timeline.start, default)] + keys
+        return float(_interp(keys, frame))
+
     def root_at(self, frame: int, rest_height: float) -> tuple[np.ndarray, float]:
-        pos_keys = [(k.frame, np.asarray(k.position, dtype=float)) for k in self.root_keys if k.position is not None]
-        head_keys = [(k.frame, np.asarray(k.heading_deg, dtype=float)) for k in self.root_keys if k.heading_deg is not None]
-        if pos_keys:
-            position = np.array(_interp(pos_keys, frame), dtype=float)
-        else:
-            position = np.array([*self.track.origin_xy, rest_height], dtype=float)
-        heading = float(_interp(head_keys, frame)) if head_keys else float(self.track.heading_deg)
-        return position, heading
+        def channel(name: str, default: float) -> float:
+            return self._channel([(k.frame, k.value) for k in self.root_keys if k.channel == name], frame, default)
+
+        x, y = track_to_world(self.track, channel("forward", 0.0), channel("left", 0.0))
+        return np.array([x, y, channel("height", rest_height)]), channel("heading", float(self.track.heading_deg))
 
     def channel_at(self, channel: str, frame: int) -> float:
-        keys = [(k.frame, np.asarray(k.value_deg, dtype=float)) for k in self.pose_keys if k.channel == channel]
-        return float(_interp(keys, frame)) if keys else 0.0
+        return self._channel([(k.frame, k.value_deg) for k in self.pose_keys if k.channel == channel], frame, 0.0)
 
     def keyed_channels(self) -> set[str]:
         return {k.channel for k in self.pose_keys}
