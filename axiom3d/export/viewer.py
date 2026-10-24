@@ -1,8 +1,9 @@
-"""A self-contained HTML viewer: play an axiom3d animation in any browser, no Blender needed."""
+"""A self-contained HTML viewer: play an axiom3d animation, or turn a static model, in any browser."""
 
 from __future__ import annotations
 
 import base64
+import html
 import tempfile
 from pathlib import Path
 from string import Template
@@ -10,7 +11,7 @@ from string import Template
 import numpy as np
 
 from axiom3d.conventions import zup_to_yup
-from axiom3d.export.gltf import export_glb
+from axiom3d.export.gltf import export_glb, export_mesh_glb
 
 THREE_MODULE = "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
 THREE_ADDONS = "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
@@ -49,7 +50,8 @@ h1 { font-size: 1.15rem; font-weight: 700; margin: 0; letter-spacing: 0.01em; te
 .stage { position: relative; flex: 1; min-height: 260px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--stage); overflow: hidden; }
 canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-.legend { position: absolute; left: 10px; top: 10px; display: flex; gap: 8px; font-family: var(--mono); font-size: 0.72rem; }
+.legend { position: absolute; left: 10px; top: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px;
+  font-family: var(--mono); font-size: 0.72rem; pointer-events: none; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 999px;
   background: var(--panel); border: 1px solid var(--line); color: var(--fg); }
 .dot { width: 9px; height: 9px; border-radius: 50%; }
@@ -67,14 +69,14 @@ input[type=range] { flex: 1 1 180px; min-width: 0; accent-color: var(--accent); 
 
 <header>
   <h1>$title</h1>
-  <div class="meta"><span>task $task</span><span>$fps fps</span><span>frames 0–$end</span><span>grid 0.5 m</span><span>Y-up view</span></div>
+  <div class="meta">$meta</div>
 </header>
 <div class="stage" id="stage">
-  <canvas id="view" aria-label="3D view of the animation; drag to orbit, pinch or scroll to zoom"></canvas>
-  <div class="legend"><span class="chip"><span class="dot" style="background:var(--left)"></span>LEFT</span><span class="chip"><span class="dot" style="background:var(--right)"></span>RIGHT</span></div>
+  <canvas id="view" aria-label="$aria; drag to orbit, pinch or scroll to zoom"></canvas>
+  <div class="legend">$legend</div>
   <div class="notice" id="notice">Loading the 3D view…</div>
 </div>
-<div class="transport">
+<div class="transport"$transport_attr>
   <button id="play" type="button">Pause</button>
   <input id="scrub" type="range" min="0" max="$end" step="1" value="0" aria-label="Frame">
   <div class="readout"><span>frame</span> <b id="frame" data-frame="0">0</b> <span>/ $end ·</span> <b id="secs">0.00</b><span> s</span></div>
@@ -111,7 +113,7 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x8a96a3, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(2.5, 4, 3);
 scene.add(sun);
-const grid = new THREE.GridHelper(6, 12);
+const grid = new THREE.GridHelper($grid_size, $grid_div);
 scene.add(grid);
 
 function paintTheme() {
@@ -125,7 +127,7 @@ new MutationObserver(paintTheme).observe(document.documentElement, { attributes:
 // Fit the whole motion (all frames), from the front-left and above, for any screen shape.
 const target = new THREE.Vector3(...FRAME_CENTER);
 let userMoved = false;
-controls.addEventListener("start", () => { userMoved = true; });
+controls.addEventListener("start", () => { userMoved = true; controls.autoRotate = false; });
 function frameMotion() {
   const v = THREE.MathUtils.degToRad(camera.fov);
   const h = 2 * Math.atan(Math.tan(v / 2) * camera.aspect);
@@ -160,9 +162,14 @@ function show(frame) {
 new GLTFLoader().parse(bytes.buffer, "", (gltf) => {
   scene.add(gltf.scene);
   grid.position.set(target.x, 0, target.z);
-  mixer = new THREE.AnimationMixer(gltf.scene);
-  action = mixer.clipAction(gltf.animations[0]);
-  action.play();
+  if (gltf.animations.length) {
+    mixer = new THREE.AnimationMixer(gltf.scene);
+    action = mixer.clipAction(gltf.animations[0]);
+    action.play();
+  } else if (playing) {
+    controls.autoRotate = true;  // a static model turns slowly until touched
+    controls.autoRotateSpeed = 1.2;
+  }
   document.getElementById("notice").hidden = true;
   window.__axiomViewerReady = true;
   resize();
@@ -203,18 +210,42 @@ def _motion_bounds(states) -> tuple[list[float], float]:
     return [float(v) for v in (lo + hi) / 2], float(np.linalg.norm(hi - lo) / 2)
 
 
+def _page(glb: bytes, centre, radius: float, standalone: bool, **fields) -> str:
+    encoded = base64.b64encode(glb).decode("ascii")
+    wrapped = "\n".join(encoded[i:i + 120] for i in range(0, len(encoded), 120))
+    page = _PAGE.substitute(
+        glb=wrapped, three_module=THREE_MODULE, three_addons=THREE_ADDONS,
+        cx=f"{centre[0]:.3f}", cy=f"{centre[1]:.3f}", cz=f"{centre[2]:.3f}", radius=f"{radius:.3f}", **fields,
+    )
+    return _STANDALONE_HEAD + page + "</html>\n" if standalone else page
+
+
+def _spans(items) -> str:
+    return "".join(f"<span>{html.escape(str(i))}</span>" for i in items)
+
+
 def viewer_html(skel, clip, states, title: str, task: str, standalone: bool = True) -> str:
     centre, radius = _motion_bounds(states)
     with tempfile.TemporaryDirectory() as tmp:
         glb = export_glb(skel, clip, states, Path(tmp) / "clip.glb").read_bytes()
-    encoded = base64.b64encode(glb).decode("ascii")
-    wrapped = "\n".join(encoded[i:i + 120] for i in range(0, len(encoded), 120))
-    page = _PAGE.substitute(
-        title=title, task=task, fps=clip.timeline.fps, end=clip.timeline.end, glb=wrapped,
-        three_module=THREE_MODULE, three_addons=THREE_ADDONS,
-        cx=f"{centre[0]:.3f}", cy=f"{centre[1]:.3f}", cz=f"{centre[2]:.3f}", radius=f"{radius:.3f}",
-    )
-    return _STANDALONE_HEAD + page + "</html>\n" if standalone else page
+    end = clip.timeline.end
+    legend = ('<span class="chip"><span class="dot" style="background:var(--left)"></span>LEFT</span>'
+              '<span class="chip"><span class="dot" style="background:var(--right)"></span>RIGHT</span>')
+    return _page(glb, centre, radius, standalone, title=html.escape(title), fps=clip.timeline.fps, end=end,
+                 meta=_spans([f"task {task}", f"{clip.timeline.fps} fps", f"frames 0–{end}", "grid 0.5 m", "Y-up view"]),
+                 aria="3D view of the animation", legend=legend, transport_attr="", grid_size=6, grid_div=12)
+
+
+def mesh_viewer_html(mesh, colors, title: str, task: str, facts=(), standalone: bool = True) -> str:
+    """A static model (no transport bar) that turns slowly; `facts` show as chips over the view."""
+    pts = np.array([zup_to_yup(p) for p in mesh.vertices.astype(float)])
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    with tempfile.TemporaryDirectory() as tmp:
+        glb = export_mesh_glb(mesh, colors, Path(tmp) / "model.glb").read_bytes()
+    legend = "".join(f'<span class="chip">{html.escape(str(f))}</span>' for f in facts)
+    return _page(glb, (lo + hi) / 2, float(np.linalg.norm(hi - lo) / 2), standalone, title=html.escape(title),
+                 fps=24, end=0, meta=_spans([f"task {task}", "static model", "grid 0.1 m", "Y-up view"]),
+                 aria="3D view of the model", legend=legend, transport_attr=" hidden", grid_size=1, grid_div=10)
 
 
 def export_html(skel, clip, states, path: Path, title: str, task: str) -> Path:

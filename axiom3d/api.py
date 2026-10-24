@@ -530,6 +530,15 @@ class Workbench:
 
         st = self._load(session)
         clip, states = self._rebuild(st)
+        if get_task(st.task_id).kind == "vessel":
+            from axiom3d.export.gltf import export_mesh_glb
+            from axiom3d.model.vessel import vessel_mesh
+
+            if clip.vessel is None:
+                raise AxiomError("nothing to export yet: call shape_profile first")
+            path = export_mesh_glb(*vessel_mesh(clip.vessel), self.home / "exports" / f"{st.id}.glb")
+            return ToolResult(self._finish_text(
+                st, [f"EXPORTED: {path} (glTF 2.0 binary with vertex colours; Y-up, opens in Blender)"], clip, states))
         path = export_glb(self.skel, clip, states, self.home / "exports" / f"{st.id}.glb")
         return ToolResult(self._finish_text(st, [f"EXPORTED: {path} (glTF 2.0 binary; Y-up, opens in Blender)"], clip, states))
 

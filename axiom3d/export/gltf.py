@@ -1,4 +1,5 @@
-"""glTF 2.0 binary (.glb) export: joint hierarchy, rigid segment meshes, baked animation."""
+"""glTF 2.0 binary (.glb) export: the mannequin (joints, rigid segments, baked animation) or a static
+coloured mesh (vessels)."""
 
 from __future__ import annotations
 
@@ -101,7 +102,7 @@ def export_glb(skel, clip, states, path: Path) -> Path:
         animate(node_of[name], "rotation", _continuous(np.array([_xyzw(q) for q in quats])), "VEC4")
 
     colors = {"left": LEFT_COLOR, "right": RIGHT_COLOR, "center": CENTER_COLOR}
-    gltf = {
+    return _write_glb({
         "asset": {"version": "2.0", "generator": "axiom3d"},
         "scene": 0,
         "scenes": [{"nodes": [0]}],
@@ -113,10 +114,38 @@ def export_glb(skel, clip, states, path: Path) -> Path:
             for side in ("left", "right", "center")
         ],
         "animations": [{"name": "clip", "samplers": samplers, "channels": channels}],
-        "accessors": buf.accessors,
-        "bufferViews": buf.views,
-        "buffers": [{"byteLength": len(buf.data)}],
-    }
+    }, buf, path)
+
+
+def _srgb_to_linear(c: np.ndarray) -> np.ndarray:
+    """glTF vertex colours are linear; axiom3d colours are sRGB like every #rrggbb."""
+    c = np.clip(np.asarray(c, dtype=float), 0.0, 1.0)
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def export_mesh_glb(mesh, colors: np.ndarray, path: Path, name: str = "vessel") -> Path:
+    """A static mesh with per-vertex colours (COLOR_0), stood Z-up like the mannequin."""
+    buf = _Buffer()
+    pos = buf.add(mesh.vertices.astype(np.float32), "VEC3", ARRAY_BUFFER, bounds=True)
+    nrm = buf.add(mesh.normals().astype(np.float32), "VEC3", ARRAY_BUFFER)
+    col = buf.add(_srgb_to_linear(colors).astype(np.float32), "VEC3", ARRAY_BUFFER)
+    idx = buf.add(mesh.faces.astype(np.uint32).reshape(-1), "SCALAR", ELEMENT_ARRAY_BUFFER)
+    return _write_glb({
+        "asset": {"version": "2.0", "generator": "axiom3d"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": f"{name}_root", "rotation": list(GLTF_ROOT_ROTATION_XYZW), "children": [1]},
+                  {"name": name, "mesh": 0}],
+        "meshes": [{"name": name, "primitives": [
+            {"attributes": {"POSITION": pos, "NORMAL": nrm, "COLOR_0": col}, "indices": idx, "material": 0}]}],
+        # Glazed porcelain: white base so the vertex colours show as painted.
+        "materials": [{"name": "glaze", "pbrMetallicRoughness": {"baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+                                                                 "metallicFactor": 0.0, "roughnessFactor": 0.35}}],
+    }, buf, path)
+
+
+def _write_glb(gltf: dict, buf: _Buffer, path: Path) -> Path:
+    gltf.update({"accessors": buf.accessors, "bufferViews": buf.views, "buffers": [{"byteLength": len(buf.data)}]})
     while len(buf.data) % 4:
         buf.data.append(0)
     gltf["buffers"][0]["byteLength"] = len(buf.data)

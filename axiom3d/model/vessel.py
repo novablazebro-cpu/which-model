@@ -338,6 +338,12 @@ def _parse_obj(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return v, c, f
 
 
+def load_obj(path) -> tuple[Mesh, np.ndarray]:
+    """Any OBJ as a mesh and per-vertex RGB (0..1; white where the file has no colour)."""
+    v, c, f = _parse_obj(Path(path))
+    return Mesh(v.astype(np.float32), f.astype(np.int32)), c.astype(np.float32)
+
+
 def measure_obj(path) -> tuple[VesselMeasures, bool]:
     """Measure any OBJ by slicing it like a vessel (Z up). Returns (measures, watertight)."""
     v, c, f = _parse_obj(Path(path))

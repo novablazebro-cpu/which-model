@@ -75,12 +75,13 @@ def world_triangles(skel, state) -> tuple[np.ndarray, np.ndarray]:
     return np.concatenate(tris), np.concatenate(colors).astype(float)
 
 
-def _rasterize(tris: np.ndarray, colors: np.ndarray, camera: Camera, size: int, base: np.ndarray) -> np.ndarray:
+def _rasterize(tris: np.ndarray, colors: np.ndarray, camera: Camera, size: int, base: np.ndarray,
+               light: np.ndarray = LIGHT) -> np.ndarray:
     img = base.astype(float).copy()
     depth = np.full((size, size), np.inf)
     normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     lengths = np.linalg.norm(normals, axis=1)
-    shade = 0.45 + 0.55 * np.abs(normals @ LIGHT) / np.where(lengths < 1e-12, 1.0, lengths)
+    shade = 0.45 + 0.55 * np.abs(normals @ light) / np.where(lengths < 1e-12, 1.0, lengths)
     proj = camera.project(tris.reshape(-1, 3), size).reshape(-1, 3, 3)
     for (a, b, c), color, s in zip(proj, colors, shade):
         x0, x1 = int(max(0, np.floor(min(a[0], b[0], c[0])))), int(min(size - 1, np.ceil(max(a[0], b[0], c[0]))))
@@ -208,6 +209,120 @@ def render_footprints(skel, clip, states, size: int = 384) -> Image.Image:
         draw.text(px(b), f"f{st.frame}", fill=(30, 30, 30), font=font)
     draw.text((6, 4), "FOOTPRINTS (top-down, track forward = up)", fill=(20, 20, 20), font=font)
     return img
+
+
+VESSEL_LIGHT = np.array([-0.4, -0.8, 0.45]) / np.linalg.norm([-0.4, -0.8, 0.45])
+INK = (35, 40, 46)
+FAINT = (150, 156, 162)
+
+
+def _tag(draw: ImageDraw.ImageDraw, xy, text: str, font, fill=INK) -> None:
+    """Text on a background box, readable over any paint."""
+    x0, y0, x1, y1 = draw.textbbox(xy, text, font=font)
+    draw.rectangle([x0 - 2, y0 - 1, x1 + 2, y1 + 1], fill=BACKGROUND)
+    draw.text(xy, text, fill=fill, font=font)
+
+
+def _vessel_side(spec, m, size: int) -> Image.Image:
+    from axiom3d.model.vessel import vessel_mesh
+
+    height, rmax = m.height, m.max_diameter / 2
+    half = max(0.62 * height, 1.45 * rmax)
+    centre = 0.47 * height  # a little headroom for the title
+    cam = Camera("SIDE (looking +Y; up = +Z)", np.array([0.0, -3.0, centre]), np.array([0.0, 0.0, centre]),
+                 np.array([0.0, 0.0, 1.0]), ortho_half_height=half)
+    mesh, vcol = vessel_mesh(spec, segments=32)
+    v = mesh.vertices.astype(float)
+    tris = v[mesh.faces]
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    keep = normals[:, 1] < 0  # facing the camera
+    colors = vcol[mesh.faces].mean(axis=1)[keep] * 255
+    base = Image.new("RGB", (size, size), BACKGROUND)
+    img = Image.fromarray(_rasterize(tris[keep], colors, cam, size, np.asarray(base), VESSEL_LIGHT).astype(np.uint8))
+    draw = ImageDraw.Draw(img)
+    font = _font(max(10, size // 30))
+
+    def px(x, z):
+        q = cam.project(np.array([[x, 0.0, z]]), size)[0]
+        return float(q[0]), float(q[1])
+
+    ground = px(-half, 0)[1]
+    draw.line([(0, ground), (size, ground)], fill=GRID_COLOR, width=1)
+    # Height bracket on the right.
+    xr = 1.18 * rmax
+    (bx, by0), (_, by1) = px(xr, 0), px(xr, height)
+    draw.line([(bx, by0), (bx, by1)], fill=INK, width=1)
+    for y in (by0, by1):
+        draw.line([(bx - 4, y), (bx + 4, y)], fill=INK, width=1)
+    _tag(draw, (bx + 6, (by0 + by1) / 2 - 6), f"H {height:.3f}", font)
+    (x0, y), (x1, _) = px(-rmax, m.shoulder_height), px(rmax, m.shoulder_height)
+    draw.line([(x0, y), (x1, y)], fill=INK, width=1)
+    _tag(draw, (x0, y - 17), f"max D {m.max_diameter:.3f} at h {m.shoulder_height:.3f}", font)
+    mx, my = px(m.mouth_diameter / 2, height)
+    _tag(draw, (mx + 8, my - 2), f"mouth D {m.mouth_diameter:.3f}", font)
+    fx, fy = px(m.foot_diameter / 2, 0)
+    _tag(draw, (fx + 8, fy - 16), f"foot D {m.foot_diameter:.3f}", font)
+    _tag(draw, (6, 4), cam.title, font, fill=(20, 20, 20))
+    draw.rectangle([0, 0, size - 1, size - 1], outline=(180, 180, 180))
+    return img
+
+
+def _vessel_profile(spec, m, size: int) -> Image.Image:
+    from axiom3d.model.vessel import _rgb
+    from axiom3d.perceive.vessel import color_zones
+
+    img = Image.new("RGB", (size, size), BACKGROUND)
+    draw = ImageDraw.Draw(img)
+    font = _font(max(10, size // 30))
+    left, right, top, bottom = 52, size - 14, 28, size - 34
+    height, rmax = m.height, max(m.max_diameter / 2, 1e-3)
+    rspan = 1.15 * rmax
+
+    def px(r, h):
+        return left + (r / rspan) * (right - left), bottom - (h / height) * (bottom - top)
+
+    for h in np.arange(0, height + 1e-9, 0.05 if height > 0.2 else 0.02):
+        y = px(0, h)[1]
+        draw.line([(left, y), (right, y)], fill=GRID_COLOR, width=1)
+        draw.text((6, y - 6), f"{h:.2f}", fill=FAINT, font=font)
+    for r in np.arange(0, rspan + 1e-9, 0.02 if rspan > 0.06 else 0.01):
+        x = px(r, 0)[0]
+        draw.line([(x, top), (x, bottom)], fill=GRID_COLOR, width=1)
+        draw.text((x - 10, bottom + 4), f"{r:.2f}", fill=FAINT, font=font)
+    for a, b, c in color_zones(spec):  # the paint, as a strip along the axis
+        (_, y0), (_, y1) = px(0, a), px(0, b)
+        draw.rectangle([left - 10, y1, left - 3, y0], fill=tuple(int(v * 255) for v in _rgb(c)))
+    inner = m.h >= spec.wall
+    draw.line([px(r - spec.wall, h) for h, r in zip(m.h[inner], m.r[inner]) if r > spec.wall],
+              fill=FAINT, width=1)
+    draw.line([px(r, h) for h, r in zip(m.h, m.r)], fill=INK, width=3)
+    for h, r in spec.profile:
+        x, y = px(r, h)
+        draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=(66, 133, 244))
+    sx, sy = px(m.max_diameter / 2, m.shoulder_height)
+    _tag(draw, (min(sx + 8, right - 100), sy - 6), f"widest r {m.max_diameter / 2:.3f}", font)
+    draw.text((left + 4, top - 22), "PROFILE: radius across, height up (dots = your points)", fill=(20, 20, 20),
+              font=font)
+    draw.text((right - 120, bottom + 16), "radius (m)", fill=FAINT, font=font)
+    draw.rectangle([0, 0, size - 1, size - 1], outline=(180, 180, 180))
+    return img
+
+
+def render_vessel_sheet(spec, size: int = 384) -> Image.Image:
+    """Side view with dimensions, beside the profile plot (radius against height)."""
+    from axiom3d.model.vessel import measure_cached
+
+    m = measure_cached(spec)
+    sheet = Image.new("RGB", (2 * size, size + 24), BACKGROUND)
+    sheet.paste(_vessel_side(spec, m, size), (0, 0))
+    sheet.paste(_vessel_profile(spec, m, size), (size, 0))
+    ImageDraw.Draw(sheet).text(
+        (8, size + 5),
+        f"height {m.height:.3f} m | max D {m.max_diameter:.3f} | shoulder ratio {m.shoulder_ratio:.2f} | mouth D "
+        f"{m.mouth_diameter:.3f} | foot D {m.foot_diameter:.3f} | {m.capacity_l:.1f} L | tip {m.tip_angle_deg:.0f} deg"
+        "   (D = diameter, r = radius, metres)",
+        fill=(60, 60, 60), font=_font(max(10, size // 34)))
+    return sheet
 
 
 def to_png(img: Image.Image) -> bytes:
