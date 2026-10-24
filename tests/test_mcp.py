@@ -7,7 +7,7 @@ from mcp.client.stdio import stdio_client
 from axiom3d.session_store import current_id, load
 from axiom3d.eval.agents import correct_script
 
-TOOLS = {"start_session", "answer_quiz", "guide", "observe", "check", "set_root", "set_pose", "plant_foot",
+TOOLS = {"start_session", "answer_quiz", "guide", "observe", "check", "calc", "set_root", "set_pose", "plant_foot",
          "swing_foot", "undo", "accept_discrepancy", "finish", "export"}
 
 

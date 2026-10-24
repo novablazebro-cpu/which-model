@@ -131,10 +131,23 @@ def _frames(text: str) -> tuple[str, Frames]:
     return text, Frames("one", int(sel))
 
 
-def parse_prediction(text: str, skel) -> Prediction:
+def _substitute(body: str, variables: dict | None) -> str:
+    """Replace $name with the calculator variable's value."""
+    def value(m):
+        name = m.group(1)
+        if not variables or name not in variables:
+            raise PredictionError(f"unknown variable ${name}; set it with calc, e.g. calc('{name} = 0.36')")
+        v = variables[name]
+        if isinstance(v, (list, tuple)):
+            raise PredictionError(f"${name} is a vector; use a number, e.g. calc('{name}_x = {name}.x')")
+        return f"{float(v):.10g}"
+    return re.sub(r"\$([a-z_][a-z0-9_]*)", value, body)
+
+
+def parse_prediction(text: str, skel, variables: dict | None = None) -> Prediction:
     if not isinstance(text, str) or not text.strip():
         raise PredictionError("empty prediction")
-    body, frames = _frames(_normalize(text))
+    body, frames = _frames(_substitute(_normalize(text), variables))
     m = re.fullmatch(r"([a-z_]+) on_ground", body)
     if m:
         return Prediction("relation", "on_ground", point=_point(m.group(1), skel), frames=frames, text=text)

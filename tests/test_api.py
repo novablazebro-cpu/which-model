@@ -223,3 +223,22 @@ def test_server_workbench_only_sees_its_own_session(home):
     strict.start_session("step_forward")
     bare.set_root(frame=0, height=0.9)
     assert load(bare.session_id, home).commands and not load(strict.session_id, home).commands
+
+
+def test_calc_tool_and_variables_in_edits(home):
+    wb = started(home)
+    out = wb.calc("r = reach(0.89); s = 0.36")
+    assert "r = 0.251" in out.text and "s = 0.360" in out.text          # allowed before the quiz
+    pass_quiz(wb, home)
+    res = wb.plant_foot(side="left", start=0, end=24, forward=0.36, expect=["left_ankle.forward ~= $s ± 0.05"])
+    assert "PASS" in res.text or "FAIL" in res.text
+    with pytest.raises(AxiomError, match="calc"):
+        wb.set_pose(frame=12, angles={"left_shoulder.flexion": 10}, expect=["left_shoulder.flexion@12 ~= $nope ± 1"])
+    assert Workbench(home).calc("s * 2").text.startswith("= 0.720")      # variables persist across instances
+    with pytest.raises(AxiomError, match="left_toe"):
+        wb.calc("left_tow.z")
+
+
+def test_calc_in_bare_mode(home):
+    wb = started(home, protocol=False)
+    assert "= 0.068" in wb.calc("left_ankle.z").text

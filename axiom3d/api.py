@@ -16,6 +16,7 @@ from axiom3d.conventions import CONVENTIONS_TEXT
 from axiom3d.perceive.render import render_filmstrip, render_footprints, render_sheet, to_png
 from axiom3d.perceive.report import describe_frame, describe_timeline
 from axiom3d.protocol.briefing import Question, grade_quiz
+from axiom3d.protocol.calc import CalcError, run_calc
 from axiom3d.protocol.gate import run_exam
 from axiom3d.protocol.predict import PredictionError, evaluate_prediction, is_precise, parse_prediction
 from axiom3d.rig.humanoid import build_mannequin
@@ -169,6 +170,21 @@ class Workbench:
         except KeyError as e:
             raise AxiomError(e.args[0]) from None
 
+    @_locked
+    def calc(self, expr: str, session: str | None = None) -> ToolResult:
+        """Exact math on the scene. Allowed in every phase; never changes the scene."""
+        st = self._load(session)
+        clip, states = rebuild(st, self.skel)
+        try:
+            result = run_calc(expr, self.skel, clip, states, st.variables)
+        except CalcError as e:
+            raise AxiomError(f"{e}. See guide('calculator').") from None
+        st.variables.update(result.assigned)
+        save(st, self.home)
+        lines = result.lines + (["Use these in predictions as $name, e.g. ~= $" + next(iter(result.assigned)) + " ± 0.02."]
+                                if result.assigned else [])
+        return ToolResult(self._finish_text(st, lines, clip, states))
+
     # ---- seeing --------------------------------------------------------------------------------
     def _frames(self, clip, frames) -> list[int]:
         tl = clip.timeline
@@ -248,7 +264,7 @@ class Workbench:
         if st.protocol:
             texts = [expect] if isinstance(expect, str) else list(expect or [])
             try:
-                predictions = [parse_prediction(t, self.skel) for t in texts]
+                predictions = [parse_prediction(t, self.skel, st.variables) for t in texts]
             except PredictionError as e:
                 st.ledger["rejected_edits"] += 1
                 save(st, self.home)
@@ -371,7 +387,7 @@ class Workbench:
             raise AxiomError("Resolve the failed prediction first: undo() or accept_discrepancy(reason).")
         claims = [claims] if isinstance(claims, str) else list(claims or [])
         clip, states = rebuild(st, self.skel)
-        exam = run_exam(self.skel, clip, states, get_task(st.task_id), claims, st.protocol)
+        exam = run_exam(self.skel, clip, states, get_task(st.task_id), claims, st.protocol, st.variables)
         st.ledger["exam_attempts"] += 1
         st.ledger["task_success"] = exam.task_success
         if not st.protocol:

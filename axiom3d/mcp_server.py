@@ -52,6 +52,11 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
         return _reply(lambda: wb.observe(frames, [views] if isinstance(views, str) else views))
 
     @tool
+    def calc(expr: str) -> list | str:
+        """Compute with the scene: dist(left_ankle@24, pelvis@24), reach(0.89), stride = ...; reuse as $stride in predictions."""
+        return _reply(lambda: wb.calc(expr))
+
+    @tool
     def check() -> list | str:
         """Run every check (geometry, anatomy, gait) and show the acceptance criteria status."""
         return _reply(lambda: wb.check())

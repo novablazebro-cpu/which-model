@@ -21,7 +21,7 @@ class ExamResult:
     problems: list[str] = field(default_factory=list)
 
 
-def run_exam(skel, clip, states, task, claims: list[str], protocol: bool) -> ExamResult:
+def run_exam(skel, clip, states, task, claims: list[str], protocol: bool, variables: dict | None = None) -> ExamResult:
     results = run_checks(CheckContext(skel, clip, states, task.kind))
     errors = [r for r in results if r.severity == "error"]
     warnings = [r for r in results if r.severity == "warning"]
@@ -31,7 +31,7 @@ def run_exam(skel, clip, states, task, claims: list[str], protocol: bool) -> Exa
     graded, precise = [], 0
     for text in claims:
         try:
-            p = parse_prediction(text, skel)
+            p = parse_prediction(text, skel, variables)
             graded.append((text, evaluate_prediction(p, skel, clip, states, states[-1].frame), ""))
             precise += is_precise(p)
         except PredictionError as e:

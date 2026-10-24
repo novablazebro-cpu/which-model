@@ -31,6 +31,7 @@ class SessionState:
     quiz: list[dict] = field(default_factory=list)
     pending_discrepancy: dict | None = None
     ledger: dict = field(default_factory=dict)
+    variables: dict = field(default_factory=dict)
 
 
 def _path(home: Path, session_id: str) -> Path:

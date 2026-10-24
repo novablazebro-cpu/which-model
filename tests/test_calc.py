@@ -84,3 +84,13 @@ def test_variable_limit(skel, step):
     many = {f"v{i}": 1.0 for i in range(50)}
     with pytest.raises(CalcError, match="50"):
         calc(skel, step, "extra = 1", many)
+
+
+def test_dollar_variables_in_predictions(skel, step):
+    from axiom3d.protocol.predict import PredictionError, evaluate_prediction, parse_prediction
+    p = parse_prediction("left_ankle.forward@24 ~= $s ± 0.02", skel, {"s": 0.36})
+    assert evaluate_prediction(p, skel, step[0], step[1], 24).passed and p.text.endswith("± 0.02")
+    with pytest.raises(PredictionError, match="calc"):
+        parse_prediction("left_ankle.forward ~= $missing ± 0.02", skel, {})
+    with pytest.raises(PredictionError, match="vector"):
+        parse_prediction("left_ankle.forward ~= $v ± 0.02", skel, {"v": [1.0, 2.0, 3.0]})

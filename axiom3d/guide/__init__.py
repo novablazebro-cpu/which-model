@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib import resources
 
-TOPICS = ("conventions", "walking", "predictions", "tools")
+TOPICS = ("conventions", "walking", "predictions", "calculator", "tools")
 
 
 def read_topic(name: str) -> str:
