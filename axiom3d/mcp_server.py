@@ -1,4 +1,4 @@
-"""MCP server: the 13 axiom3d tools, each a thin wrapper over the Workbench."""
+"""MCP server: the 17 axiom3d tools, each a thin wrapper over the Workbench."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ INSTRUCTIONS = """\
 axiom3d is a 3D workbench built for AI models. The tool computes the geometry; you decide.
 1) start_session(task), then answer_quiz: editing unlocks when every answer is right.
 2) observe: trust the numbers in the report over your reading of images.
-3) Edit with set_root / set_pose / plant_foot / swing_foot; every edit needs expect=[precise predictions].
+3) Edit with set_root / set_pose / plant_foot / swing_foot (vessels: shape_profile / paint_band);
+   every edit needs expect=[precise predictions].
 4) A failed prediction blocks edits until undo() or accept_discrepancy(reason).
 5) finish(claims) only certifies passing work. NOT CERTIFIED means the task is not done."""
 
@@ -35,7 +36,7 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
 
     @tool
     def start_session(task: str) -> list | str:
-        """Start a task: step_forward, walk_forward or turn_then_step. Returns the goal, conventions and quiz."""
+        """Start a task: step_forward, walk_forward, turn_then_step or meiping_vase. Returns the goal, conventions and quiz."""
         return _reply(lambda: wb.start_session(task))
 
     @tool
@@ -45,7 +46,7 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
 
     @tool
     def guide(topic: str) -> list | str:
-        """Read a guide topic: conventions, walking, predictions or tools."""
+        """Read a guide topic: conventions, walking, vessels, predictions, calculator or tools."""
         return _reply(lambda: wb.guide(topic))
 
     @tool
@@ -87,6 +88,18 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
                    dry_run: bool = False) -> list | str:
         """Carry a foot in an arc (apex in m) from the plant ending at start to the plant starting at end."""
         return _reply(lambda: wb.swing_foot(side, start, end, apex, expect, dry_run))
+
+    @tool
+    def shape_profile(points: list[list[float]], wall: float = 0.006, expect: list[str] | str | None = None,
+                      dry_run: bool = False) -> list | str:
+        """Vessels: set the side profile as [height, RADIUS] points from the base (h=0) up, e.g. [[0, 0.06], [0.2, 0.1], [0.4, 0.02]]."""
+        return _reply(lambda: wb.shape_profile(points, wall, expect, dry_run))
+
+    @tool
+    def paint_band(start: float, end: float, color: str, expect: list[str] | str | None = None,
+                   dry_run: bool = False) -> list | str:
+        """Vessels: paint heights start..end (m) red, blue, white, green, yellow, black, gold or #rrggbb; later bands cover earlier ones."""
+        return _reply(lambda: wb.paint_band(start, end, color, expect, dry_run))
 
     @tool
     def batch(edits: list[dict], expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:

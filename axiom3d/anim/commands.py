@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import math
 
 from axiom3d.anim.clip import ROOT_CHANNELS, Clip, Plant, PoseKey, RootKey, Swing
 from axiom3d.conventions import track_to_world
+from axiom3d.model.vessel import MAX_HEIGHT, Band, VesselError, VesselSpec, parse_color, validate
 
 SIDES = ("left", "right")
-OPS = ("set_root", "set_pose", "plant_foot", "swing_foot")
+VESSEL_OPS = ("shape_profile", "paint_band")
+OPS = ("set_root", "set_pose", "plant_foot", "swing_foot") + VESSEL_OPS
+MAX_BANDS = 32
+DEFAULT_WALL = 0.006
 MIN_APEX = 0.03
 MAX_ANGLE = 720.0
 MAX_DISTANCE = 50.0
@@ -93,8 +98,12 @@ def apply_command(skel, clip: Clip, cmd: dict) -> Clip:
         _set_pose(skel, clip, cmd)
     elif op == "plant_foot":
         _plant(skel, clip, cmd)
-    else:
+    elif op == "swing_foot":
         _swing(clip, cmd)
+    elif op == "shape_profile":
+        _shape(clip, cmd)
+    else:
+        _paint(clip, cmd)
     return clip
 
 
@@ -164,3 +173,34 @@ def _swing(clip: Clip, cmd: dict) -> None:
         if p.side == side and _overlaps(start, end, p.start, p.end, touching=False):
             raise CommandError(f"{side} swing {start}..{end} would overlap the {side} plant {p.start}..{p.end}")
     clip.swings.append(Swing(side, start, end, apex))
+
+
+def _shape(clip: Clip, cmd: dict) -> None:
+    points = cmd.get("points")
+    if not isinstance(points, (list, tuple)):
+        raise CommandError("points must be a list of [height, radius] pairs, e.g. [[0, 0.06], [0.2, 0.1], [0.4, 0.02]]")
+    if any(not isinstance(p, (list, tuple)) or len(p) != 2 for p in points):
+        raise CommandError("each point must be [height, radius] in metres (radius, not diameter)")
+    profile = tuple((_num(h, "height"), _num(r, "radius")) for h, r in points)
+    wall = _num(cmd.get("wall", DEFAULT_WALL), "wall")
+    spec = VesselSpec(profile, wall, clip.vessel.bands if clip.vessel else ())
+    try:
+        validate(spec)
+    except VesselError as e:
+        raise CommandError(str(e)) from None
+    clip.vessel = spec
+
+
+def _paint(clip: Clip, cmd: dict) -> None:
+    if clip.vessel is None:
+        raise CommandError("there is nothing to paint yet: call shape_profile first")
+    start, end = _num(cmd.get("start"), "start"), _num(cmd.get("end"), "end")
+    if not 0 <= start < end <= MAX_HEIGHT:
+        raise CommandError(f"start must be below end, both within 0..{MAX_HEIGHT:g} m (heights), got {start:g}..{end:g}")
+    if len(clip.vessel.bands) >= MAX_BANDS:
+        raise CommandError(f"at most {MAX_BANDS} bands; undo some first")
+    try:
+        color = parse_color(cmd.get("color"))
+    except VesselError as e:
+        raise CommandError(str(e)) from None
+    clip.vessel = dataclasses.replace(clip.vessel, bands=clip.vessel.bands + (Band(start, end, color),))

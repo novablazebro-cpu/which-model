@@ -15,6 +15,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from axiom3d.conventions import FORWARD0, LEFT0, UP, character_axes, track_to_world, world_to_track
+from axiom3d.model.vessel import ATTRS as VESSEL_ATTRS
+from axiom3d.model.vessel import measure_cached, radius_at
 
 MAX_SOURCE = 500
 MAX_DEPTH = 40
@@ -72,9 +74,9 @@ class _Calc:
             "min": lambda *xs: min(self._num(x) for x in xs), "max": lambda *xs: max(self._num(x) for x in xs),
             "round": lambda x, n=0: round(self._num(x), int(self._num(n))),
             "track": self._track, "char": self._char, "world_from_track": self._world_from_track,
-            "reach": self._reach, "knee_needed": self._knee_needed,
+            "reach": self._reach, "knee_needed": self._knee_needed, "radius_at": self._radius_at,
         }
-        self.reserved = set(self.consts) | set(self.funcs) | self.points | {"root"}
+        self.reserved = set(self.consts) | set(self.funcs) | self.points | {"root", "vessel"}
 
     # ---- value helpers -------------------------------------------------------------------
     def _num(self, x) -> float:
@@ -145,6 +147,14 @@ class _Calc:
         cos_k = (a * a + b * b - length * length) / (2 * a * b)
         return 180.0 - math.degrees(math.acos(max(-1.0, min(1.0, cos_k))))
 
+    def _vessel(self):
+        if self.clip.vessel is None:
+            raise CalcError("no profile yet: call shape_profile first")
+        return self.clip.vessel
+
+    def _radius_at(self, h) -> float:
+        return radius_at(self._vessel(), self._num(h))
+
     def _state(self, frame):
         f = self._num(frame)
         if f != int(f) or not self.first <= f <= self.last:
@@ -164,6 +174,10 @@ class _Calc:
             return self._state(frame).points[node.id].copy()
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             base, attr = node.value.id, node.attr
+            if base == "vessel" and base not in self.vars:
+                if attr not in VESSEL_ATTRS:
+                    raise CalcError(f"vessel has {', '.join(VESSEL_ATTRS)}; got vessel.{attr}")
+                return float(getattr(measure_cached(self._vessel()), VESSEL_ATTRS[attr]))
             state = self._state(frame)
             if base == "root":
                 if attr not in _ROOT_ATTRS:

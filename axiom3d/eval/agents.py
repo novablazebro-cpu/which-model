@@ -12,6 +12,7 @@ from axiom3d.anim.commands import apply_command
 from axiom3d.anim.evaluate import evaluate_clip
 from axiom3d.api import AxiomError, Workbench
 from axiom3d.measure import track_coords
+from axiom3d.model.vessel import color_name, measure_cached
 from axiom3d.rig.humanoid import build_mannequin
 from axiom3d.session_store import current_id, load
 from axiom3d.tasks.library import get_task, new_clip
@@ -23,6 +24,13 @@ Step = tuple[str, dict]
 
 def _honest_expect(skel, clip, cmd: dict) -> list[str]:
     """Predictions computed by actually simulating the edit, as a careful model would."""
+    if cmd["op"] == "shape_profile":
+        m = measure_cached(clip.vessel)
+        return [f"vessel.height ~= {m.height:.3f} ± 0.005", f"vessel.max_diameter ~= {m.max_diameter:.3f} ± 0.005",
+                f"vessel.shoulder_ratio ~= {m.shoulder_ratio:.3f} ± 0.01"]
+    if cmd["op"] == "paint_band":
+        mid = (cmd["start"] + cmd["end"]) / 2
+        return [f"color({mid:.4f}) is {color_name(measure_cached(clip.vessel).color_at(mid))}"]
     states = evaluate_clip(skel, clip)
     first = states[0].frame
     if cmd["op"] == "set_root":
@@ -66,6 +74,11 @@ def _honest_script(task_id: str, commands: list[dict]) -> list[Step]:
         clip = apply_command(skel, clip, cmd)
         args = {k: v for k, v in cmd.items() if k != "op"}
         steps.append((cmd["op"], {**args, "expect": _honest_expect(skel, clip, cmd)}))
+    if clip.vessel is not None:
+        m = measure_cached(clip.vessel)
+        claims = [f"vessel.shoulder_ratio ~= {m.shoulder_ratio:.3f} ± 0.01",
+                  f"color({m.height / 2:.4f}) is {color_name(m.color_at(m.height / 2))}"]
+        return steps + [("finish", {"claims": claims})]
     last = evaluate_clip(skel, clip)[-1]
     fwd, _ = track_coords(clip, last.root_position[:2])
     claims = [f"root.forward@{last.frame} ~= {fwd:.3f} ± 0.02", f"left_heel on_ground @{last.frame}",

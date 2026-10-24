@@ -8,7 +8,7 @@ from axiom3d.session_store import current_id, load
 from axiom3d.eval.agents import correct_script
 
 TOOLS = {"start_session", "answer_quiz", "guide", "observe", "check", "calc", "set_root", "set_pose", "plant_foot",
-         "swing_foot", "batch", "undo", "accept_discrepancy", "finish", "export"}
+         "swing_foot", "shape_profile", "paint_band", "batch", "undo", "accept_discrepancy", "finish", "export"}
 
 
 def texts(result):
@@ -80,3 +80,24 @@ def test_internal_errors_never_escape(home, monkeypatch, capsys):
     assert main(["call", "observe", "--home", str(home)]) == 2
     out = capsys.readouterr().out
     assert "INTERNAL ERROR (please report): KeyError" in out and "Traceback" not in out
+
+
+def test_mcp_vessel_tools(home):
+    from axiom3d.tasks.reference import reference_commands
+
+    async def run():
+        params = StdioServerParameters(command=sys.executable, args=["-m", "axiom3d.cli", "serve", "--home", str(home),
+                                                                      "--protocol", "off"])
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as s:
+                await s.initialize()
+                assert "radius" in texts(await s.call_tool("start_session", {"task": "meiping_vase"}))
+                cmds = reference_commands("meiping_vase")
+                out = texts(await s.call_tool("shape_profile", {"points": cmds[0]["points"]}))
+                assert out.startswith("APPLIED: shape_profile(13 points"), out
+                for c in cmds[1:]:
+                    out = texts(await s.call_tool("paint_band", {k: c[k] for k in ("start", "end", "color")}))
+                    assert out.startswith("APPLIED"), out
+                assert "FAIL" not in texts(await s.call_tool("check", {}))
+
+    anyio.run(run)

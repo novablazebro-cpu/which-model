@@ -6,8 +6,10 @@ Grammar (case-insensitive):
   <subject> in [<low>, <high>]
   <point> (in_front_of | behind | left_of | right_of | above | below) <point>
   <point> on_ground
+  color(<height>) is <name | #rrggbb>           (vessels)
   subjects: <point>.(x|y|z|height|forward|left), root.(x|y|z|height|forward|left|heading),
-            <channel> such as left_hip.flexion, (slide|min_height|max_height)(<point>)
+            <channel> such as left_hip.flexion, (slide|min_height|max_height)(<point>),
+            vessel.(height|max_diameter|shoulder_ratio|...|capacity|tip_angle)
   frames:   optional @N, @A..B or @all (after the subject or at the end)
 """
 
@@ -21,6 +23,8 @@ import numpy as np
 
 from axiom3d.conventions import CONTACT_EPS
 from axiom3d.measure import relation, track_coords
+from axiom3d.model.vessel import ATTRS as VESSEL_ATTRS
+from axiom3d.model.vessel import VesselError, color_name, measure_cached, parse_color
 
 POINT_ATTRS = ("x", "y", "z", "height", "forward", "left")
 ROOT_ATTRS = POINT_ATTRS + ("heading",)
@@ -29,6 +33,9 @@ METRICS = ("slide", "min_height", "max_height")
 PRECISE_M = 0.15
 PRECISE_DEG = 20.0
 PRECISE_SLIDE = 0.05
+# Vessels are small: a length is precise within 2 cm.
+PRECISE_VESSEL = {"shoulder_ratio": 0.05, "capacity": 0.5, "tip_angle": 5.0}
+PRECISE_VESSEL_M = 0.02
 
 _NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?"
 _NAME = r"[a-z_]+(?:\.[a-z_]+)?"
@@ -43,7 +50,7 @@ class PredictionError(ValueError):
 
 @dataclass(frozen=True)
 class Subject:
-    kind: str  # "point" | "root" | "channel" | "metric"
+    kind: str  # "point" | "root" | "channel" | "metric" | "vessel"
     name: str
     attr: str | None = None
 
@@ -57,7 +64,7 @@ class Frames:
 
 @dataclass(frozen=True)
 class Prediction:
-    kind: str  # "compare" | "relation" | "metric"
+    kind: str  # "compare" | "relation" | "metric" | "color"
     op: str
     subject: Subject | None = None
     other: Subject | None = None
@@ -67,6 +74,7 @@ class Prediction:
     high: float | None = None
     point: str | None = None
     other_point: str | None = None
+    color: str | None = None  # a palette name or #rrggbb
     frames: Frames = Frames()
     text: str = field(default="", compare=False)
 
@@ -98,6 +106,11 @@ def _subject(token: str, skel) -> Subject:
     if m:
         return Subject("metric", m.group(1), _point(m.group(2), skel))
     head, _, attr = token.partition(".")
+    if head == "vessel":
+        if attr not in VESSEL_ATTRS:
+            raise PredictionError(f"unknown vessel measurement {token!r}; use one of: "
+                                  f"{', '.join('vessel.' + a for a in VESSEL_ATTRS)}")
+        return Subject("vessel", "vessel", attr)
     if not attr:
         raise PredictionError(f"{token!r} needs an attribute, e.g. {token}.z or {token}.forward")
     if head == "root" and attr in ROOT_ATTRS:
@@ -148,6 +161,13 @@ def parse_prediction(text: str, skel, variables: dict | None = None) -> Predicti
     if not isinstance(text, str) or not text.strip():
         raise PredictionError("empty prediction")
     body, frames = _frames(_substitute(_normalize(text), variables))
+    m = re.fullmatch(rf"colou?r\( ?({_NUM}) ?\) is (#?[a-z0-9]+)", body)
+    if m:
+        try:
+            parse_color(m.group(2))
+        except VesselError as e:
+            raise PredictionError(str(e)) from None
+        return Prediction("color", "is", value=float(m.group(1)), color=m.group(2), frames=frames, text=text)
     m = re.fullmatch(r"([a-z_]+) on_ground", body)
     if m:
         return Prediction("relation", "on_ground", point=_point(m.group(1), skel), frames=frames, text=text)
@@ -193,9 +213,12 @@ def _is_angle(subj: Subject) -> bool:
 
 
 def is_precise(p: Prediction) -> bool:
-    if p.kind == "relation" or p.other is not None:
+    if p.kind in ("relation", "color") or p.other is not None:
         return True
-    limit = PRECISE_DEG if _is_angle(p.subject) else PRECISE_M
+    if p.subject.kind == "vessel":
+        limit = PRECISE_VESSEL.get(p.subject.attr, PRECISE_VESSEL_M)
+    else:
+        limit = PRECISE_DEG if _is_angle(p.subject) else PRECISE_M
     if p.op == "~=":
         return p.tol <= limit
     if p.op == "in":
@@ -221,6 +244,10 @@ def _select(frames: Frames, states, default_frame: int, metric: bool) -> list:
 
 
 def _value(subj: Subject, state, clip) -> float:
+    if subj.kind == "vessel":
+        if clip.vessel is None:
+            return float("nan")  # nothing measured yet: never equal to a prediction
+        return float(getattr(measure_cached(clip.vessel), VESSEL_ATTRS[subj.attr]))
     if subj.kind == "channel":
         return float(state.angles[subj.name])
     p = state.root_position if subj.kind == "root" else state.points[subj.name]
@@ -264,7 +291,18 @@ _REL_TEXT = {
 }
 
 
+def _color(p: Prediction, clip) -> Outcome:
+    if clip.vessel is None:
+        return Outcome(False, f"color({p.value:.3f}) = none (no profile yet)")
+    found = measure_cached(clip.vessel).color_at(p.value)
+    target = parse_color(p.color)
+    ok = found == target if p.color.startswith("#") else color_name(found) == p.color
+    return Outcome(ok, f"color({p.value:.3f}) = {found} ({color_name(found)})")
+
+
 def evaluate_prediction(p: Prediction, skel, clip, states, default_frame: int) -> Outcome:
+    if p.kind == "color":
+        return _color(p, clip)
     chosen = _select(p.frames, states, default_frame, metric=p.kind == "metric")
     if p.kind == "metric":
         v = _metric(p.subject, chosen)

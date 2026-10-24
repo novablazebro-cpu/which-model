@@ -13,7 +13,7 @@ from pathlib import Path
 
 from axiom3d.anim.commands import CommandError, apply_command
 from axiom3d.anim.evaluate import evaluate_clip
-from axiom3d.protocol.briefing import make_quiz
+from axiom3d.protocol.briefing import make_quiz, make_vessel_quiz
 from axiom3d.protocol.ledger import new_ledger
 from axiom3d.tasks.library import get_task, new_clip
 
@@ -52,7 +52,7 @@ def new_session(task_id: str, protocol: bool, label: str | None, home: Path, ske
     seed = int(session_id.rsplit("-", 1)[1], 16)
     quiz = []
     if protocol:
-        questions = make_quiz(skel, new_clip(task, skel), seed)
+        questions = make_vessel_quiz(seed) if task.kind == "vessel" else make_quiz(skel, new_clip(task, skel), seed)
         quiz = json.loads(json.dumps([dataclasses.asdict(q) for q in questions]))
     return SessionState(
         id=session_id, task_id=task_id, protocol=protocol,

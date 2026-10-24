@@ -6,6 +6,7 @@ shell and measures it. Z is up, metres, the axis runs through the origin, the ba
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass, field
@@ -36,6 +37,19 @@ PALETTE = {
 }
 DEFAULT_COLOR = PALETTE["white"]
 _HEX = re.compile(r"#[0-9a-f]{6}")
+# Prediction and calculator names -> VesselMeasures fields.
+ATTRS = {
+    "height": "height",
+    "max_diameter": "max_diameter",
+    "shoulder_height": "shoulder_height",
+    "shoulder_ratio": "shoulder_ratio",
+    "mouth_diameter": "mouth_diameter",
+    "neck_diameter": "neck_diameter",
+    "waist_diameter": "waist_diameter",
+    "foot_diameter": "foot_diameter",
+    "capacity": "capacity_l",
+    "tip_angle": "tip_angle_deg",
+}
 
 
 class VesselError(ValueError):
@@ -269,6 +283,17 @@ def measure_spec(spec: VesselSpec) -> VesselMeasures:
     capacity = float(np.trapezoid(np.pi * q * q, h[inner])) * 1000 if inner.sum() > 1 else 0.0
     com = _com_height(mesh.vertices.astype(float), mesh.faces)
     return _measures(h, r, capacity, com, spec.color_at)
+
+
+@functools.lru_cache(maxsize=64)
+def measure_cached(spec: VesselSpec) -> VesselMeasures:
+    """measure_spec, memoised: specs are frozen, and edits re-measure the same scene often."""
+    return measure_spec(spec)
+
+
+def radius_at(spec: VesselSpec, height: float) -> float:
+    """The smoothed outer radius at a height (clamped to the vessel)."""
+    return float(_pchip(*validate(spec))(height))
 
 
 def write_obj(mesh: Mesh, colors: np.ndarray, path) -> Path:

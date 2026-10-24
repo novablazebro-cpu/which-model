@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from axiom3d.conventions import TrackFrame, track_to_world
+from axiom3d.model.vessel import VesselSpec
 
 ROOT_CHANNELS = ("forward", "left", "height", "heading")
 
@@ -74,6 +75,7 @@ class Clip:
     pose_keys: list[PoseKey] = field(default_factory=list)
     plants: list[Plant] = field(default_factory=list)
     swings: list[Swing] = field(default_factory=list)
+    vessel: VesselSpec | None = None  # vessel tasks: the lathe profile and its paint
 
     def _channel(self, keys: list[tuple[int, float]], frame: int, default: float) -> float:
         """Linear over the keys. A channel starts at its rest value unless keyed at the start frame."""

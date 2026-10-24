@@ -109,6 +109,45 @@ def make_quiz(skel, clip, seed: int) -> list[Question]:
     return [q1, q2, q3, q4, q5]
 
 
+VESSEL_AXES = ("+X", "+Y", "+Z")
+
+
+def make_vessel_quiz(seed: int) -> list[Question]:
+    """Vessel briefing: the frame, radius vs diameter, and the arithmetic every profile needs."""
+    rng = np.random.default_rng(seed)
+    q1 = Question("q1", "Which world axis points UP along the vessel's axis?", "choice", VESSEL_AXES, "+Z", None,
+                  "axiom3d is Z-up: the base sits on z = 0 and heights grow along +Z (many OBJ files are Y-up).")
+    ph, pr = float(rng.choice((0.12, 0.15, 0.18))), float(rng.choice((0.05, 0.07, 0.09)))
+    q2 = Question("q2", f"A profile point [{ph:.2f}, {pr:.2f}] means height {ph:.2f} m and what {pr:.2f} m?", "choice",
+                  ("radius", "diameter"), "radius", None,
+                  "Profile points are [height, radius]: the distance from the axis, half the diameter.")
+    height = float(rng.choice(np.arange(0.36, 0.441, 0.01)))
+    width = float(rng.choice((0.50, 0.54, 0.58)))
+    q3 = Question(
+        "q3",
+        f"A vase is {height:.2f} m tall and its widest DIAMETER must be {width:.2f} x its height. What RADIUS do "
+        "you give the widest profile point, in metres? Answer with 3 decimals.",
+        "number", None, f"{width * height / 2:.4f}", 0.002,
+        "diameter = ratio x height, and the radius is half the diameter.")
+    shoulder = float(rng.choice(np.arange(0.24, 0.321, 0.01)))
+    q4 = Question(
+        "q4",
+        f"A vase is {height:.2f} m tall and its widest point is at h = {shoulder:.2f} m. What is its shoulder "
+        "ratio? Answer with 2 decimals.",
+        "number", None, f"{shoulder / height:.4f}", 0.01,
+        "shoulder ratio = height of the widest point / total height.")
+    a = float(rng.choice((0.05, 0.10, 0.15)))
+    b = a + 0.15
+    probe = a + 0.05
+    q5 = Question(
+        "q5",
+        f"You paint red from 0 to {b:.2f} m, then blue from {a:.2f} to {b + 0.1:.2f} m. What colour is the vessel "
+        f"at h = {probe:.2f} m?",
+        "choice", ("red", "blue", "white"), "blue", None,
+        "bands paint in order and a later band covers an earlier one where they overlap.")
+    return [q1, q2, q3, q4, q5]
+
+
 _SYNONYMS = {
     "front": "front", "forward": "front", "forwards": "front", "in front": "front",
     "back": "back", "backward": "back", "backwards": "back", "behind": "back",
@@ -120,7 +159,7 @@ def _norm_choice(question: Question, raw: str) -> str:
     a = str(raw).strip().replace("−", "-").lower()
     if question.choices and question.choices[0] in AXES:
         a = a.replace(" ", "")
-        if a in ("x", "y"):
+        if a in ("x", "y", "z"):
             a = "+" + a
         return a.upper()
     if question.id == "q3":

@@ -27,8 +27,23 @@ def _errors(skel, kind, clip, states) -> set[str]:
     return {r.id for r in run_checks(CheckContext(skel, clip, states, kind)) if r.severity == "error"}
 
 
+def _check_delta(skel, kind, before, after) -> list[str]:
+    (clip_a, states_a), (clip_b, states_b) = before, after
+    errs_a, errs_b = _errors(skel, kind, clip_a, states_a), _errors(skel, kind, clip_b, states_b)
+    fixed, new = sorted(errs_a - errs_b), sorted(errs_b - errs_a)
+    if not (fixed or new):
+        return []
+    parts = ([f"FIXED {', '.join(fixed)}"] if fixed else []) + ([f"NEW {', '.join(new)}"] if new else [])
+    return ["  checks: " + "; ".join(parts)]
+
+
 def describe_diff(skel, kind, before, after, frame: int, limit: int = 12) -> list[str]:
     (clip_a, states_a), (clip_b, states_b) = before, after
+    if kind == "vessel":
+        from axiom3d.perceive.vessel import vessel_diff
+
+        lines = vessel_diff(clip_a.vessel, clip_b.vessel) + _check_delta(skel, kind, before, after)
+        return ["CHANGED:"] + lines if lines else ["CHANGED: nothing measurable"]
     i = frame - states_a[0].frame
     a, b = states_a[i], states_b[i]
     lines = []
@@ -55,11 +70,7 @@ def describe_diff(skel, kind, before, after, frame: int, limit: int = 12) -> lis
         if abs(vb - va) > ANGLE_TOL:
             lines.append(f"  {channel} {va:+.1f} → {vb:+.1f} @{frame}")
 
-    errs_a, errs_b = _errors(skel, kind, clip_a, states_a), _errors(skel, kind, clip_b, states_b)
-    fixed, new = sorted(errs_a - errs_b), sorted(errs_b - errs_a)
-    if fixed or new:
-        parts = ([f"FIXED {', '.join(fixed)}"] if fixed else []) + ([f"NEW {', '.join(new)}"] if new else [])
-        lines.append("  checks: " + "; ".join(parts))
+    lines += _check_delta(skel, kind, before, after)
 
     if not lines:
         return ["CHANGED: nothing measurable"]

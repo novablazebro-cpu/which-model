@@ -95,6 +95,16 @@ _REFERENCE = {
         _swing("left", 24, 32),
         dict(_plant("left", 32, 36, -0.0875, 0.36), facing=90),
     ],
+    "meiping_vase": [
+        # Measured from the reference photo: shoulder at 72% of the height, mouth 0.10 x the height.
+        {"op": "shape_profile", "wall": 0.006, "points": [
+            [0.000, 0.066], [0.012, 0.064], [0.040, 0.060], [0.120, 0.075], [0.200, 0.092], [0.260, 0.103],
+            [0.290, 0.107], [0.330, 0.100], [0.355, 0.075], [0.370, 0.040], [0.378, 0.022], [0.392, 0.018],
+            [0.400, 0.021]]},
+        {"op": "paint_band", "start": 0.04, "end": 0.37, "color": "red"},
+        {"op": "paint_band", "start": 0.0, "end": 0.04, "color": "blue"},
+        {"op": "paint_band", "start": 0.37, "end": 0.40, "color": "blue"},
+    ],
 }
 
 

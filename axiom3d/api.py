@@ -11,11 +11,12 @@ from pathlib import Path
 
 import numpy as np
 
-from axiom3d.anim.commands import CommandError, apply_command
+from axiom3d.anim.commands import VESSEL_OPS, CommandError, apply_command
 from axiom3d.anim.evaluate import evaluate_clip
 from axiom3d.checks.base import CheckContext, run_checks
 from axiom3d.conventions import CONVENTIONS_TEXT
 from axiom3d.perceive.diff import describe_diff
+from axiom3d.perceive.vessel import describe_vessel, vessel_diff
 from axiom3d.perceive.render import render_filmstrip, render_footprints, render_sheet, to_png
 from axiom3d.perceive.report import describe_frame, describe_timeline
 from axiom3d.protocol.briefing import Question, grade_quiz
@@ -27,6 +28,7 @@ from axiom3d.session_store import ReplayError, current_id, load, new_session, re
 from axiom3d.tasks.library import get_task
 
 VIEWS = ("report", "timeline", "sheet", "filmstrip", "footprints")
+VESSEL_VIEWS = ("report", "sheet")
 EXPECT_HELP = (
     "Every edit needs expect=[...]: at least one PRECISE prediction of what the edit will do; the tool measures "
     "it after applying the edit. Examples: 'left_ankle.forward ~= 0.36 ± 0.05', 'left_toe in_front_of pelvis', "
@@ -38,6 +40,24 @@ WORKFLOW = (
     "expect=[predictions]  4) check  5) finish(claims).\n"
     "Tip: plant_foot pins a foot to the ground and the tool solves the leg; swing_foot carries it in an arc "
     "between two plants. guide('walking') explains a gait, guide('predictions') the prediction syntax."
+)
+VESSEL_EXPECT_HELP = (
+    "Every edit needs expect=[...]: at least one PRECISE prediction of what the edit will do; the tool measures "
+    "it after applying the edit. Examples: 'vessel.foot_diameter ~= 0.10 ± 0.01', 'vessel.capacity in "
+    "[2.0, 2.4]', 'color(0.05) is gold', 'vessel.neck_diameter < vessel.mouth_diameter'. Precise = within "
+    "0.02 m (0.05 for a ratio, 0.5 L, 5 deg), a colour, or a comparison. See guide('vessels')."
+)
+VESSEL_WORKFLOW = (
+    "WORKFLOW: 1) answer_quiz  2) shape_profile(points=[[height, radius], ...]) with expect=[predictions]  "
+    "3) paint_band(start, end, color) with expect  4) observe / check  5) finish(claims).\n"
+    "Tip: points are [height, RADIUS] from the base (h = 0) up; the tool smooths them into a curve and measures "
+    "it. calc('radius_at(0.2)') reads the smoothed radius. guide('vessels') explains vessel anatomy."
+)
+VESSEL_CONVENTIONS = (
+    "Frame: right-handed, Z up, metres. The vessel stands on z = 0 with its axis on the Z axis.\n"
+    "Profile: [height, radius] points from the base (height 0) to the mouth; heights strictly increase.\n"
+    "A radius is half a diameter. Every DIAMETER in the acceptance criteria is 2 x radius.\n"
+    "Bands: paint_band(start, end, color) paints heights start..end; a later band covers earlier ones."
 )
 
 
@@ -56,6 +76,8 @@ def _prediction_frame(cmd: dict) -> int:
     A batch uses its last edit's frame."""
     if cmd["op"] == "batch":
         return _prediction_frame(cmd["edits"][-1])
+    if cmd["op"] in VESSEL_OPS:
+        return 0  # vessels are static: a single frame
     if cmd["op"] in ("set_root", "set_pose"):
         return int(float(cmd["frame"]))
     if cmd["op"] == "swing_foot":
@@ -70,6 +92,10 @@ def _same_scene(a, b) -> bool:
 def _describe(cmd: dict) -> str:
     if cmd["op"] == "batch":
         return f"batch({len(cmd['edits'])} edits: {', '.join(e['op'] for e in cmd['edits'])})"
+    if cmd["op"] == "shape_profile":
+        pts = cmd["points"]
+        return (f"shape_profile({len(pts)} points, height {float(pts[-1][0]):.3f} m, "
+                f"wall {float(cmd.get('wall', 0.006)):.3f})")
     args = ", ".join(f"{k}={v}" for k, v in cmd.items() if k != "op")
     return f"{cmd['op']}({args})"
 
@@ -138,16 +164,18 @@ class Workbench:
         st = new_session(task, self.protocol, self.label, self.home, self.skel)
         save(st, self.home)
         self.session_id = st.id
+        vessel = spec.kind == "vessel"
         lines = [
             f"SESSION {st.id}  task: {spec.title}",
             f"GOAL: {spec.goal}",
             "ACCEPTANCE (graded by the tool):",
             *[f"- {c.description}" for c in spec.criteria],
             "CONVENTIONS:",
-            CONVENTIONS_TEXT,
+            VESSEL_CONVENTIONS if vessel else CONVENTIONS_TEXT,
         ]
         if st.protocol:
-            lines += [WORKFLOW, 'BRIEFING QUIZ: answer with answer_quiz({"q1": "...", ..., "q5": "..."}):']
+            lines += [VESSEL_WORKFLOW if vessel else WORKFLOW,
+                      'BRIEFING QUIZ: answer with answer_quiz(answers={"q1": "...", ..., "q5": "..."}):']
             for q in st.quiz:
                 choices = f"  [choices: {', '.join(q['choices'])}]" if q["choices"] else ""
                 lines.append(f"{q['id']}: {q['text']}{choices}")
@@ -221,6 +249,8 @@ class Workbench:
     def observe(self, frames=None, views=None, session: str | None = None) -> ToolResult:
         st = self._load(session)
         clip, states = self._rebuild(st)
+        if get_task(st.task_id).kind == "vessel":
+            return self._observe_vessel(st, clip, states, views)
         views = list(views) if views else ["report", "timeline"]
         bad = [v for v in views if v not in VIEWS]
         if bad:
@@ -243,6 +273,23 @@ class Workbench:
                 images.append(("footprints", to_png(render_footprints(self.skel, clip, states))))
         if images:
             lines.append("IMAGES: " + ", ".join(label for label, _ in images) + " (blue = LEFT, orange = RIGHT)")
+        return ToolResult(self._finish_text(st, lines, clip, states), images)
+
+    def _observe_vessel(self, st, clip, states, views) -> ToolResult:
+        views = list(views) if views else ["report"]
+        bad = [v for v in views if v not in VESSEL_VIEWS]
+        if bad:
+            raise AxiomError(f"unknown view {bad[0]!r} for a vessel; views: {', '.join(VESSEL_VIEWS)}")
+        lines, images = [], []
+        if "report" in views:
+            lines.append(describe_vessel(clip.vessel))
+        if "sheet" in views:
+            from axiom3d.perceive.render import render_vessel_sheet
+
+            if clip.vessel is None:
+                raise AxiomError("nothing to draw yet: call shape_profile first")
+            images.append(("vessel", to_png(render_vessel_sheet(clip.vessel))))
+            lines.append("IMAGES: vessel (side view with measurements, and the profile)")
         return ToolResult(self._finish_text(st, lines, clip, states), images)
 
     @_locked
@@ -269,6 +316,13 @@ class Workbench:
             raise AxiomError("Session is finished; start a new one.")
         if st.protocol and st.phase == "BRIEFING":
             raise AxiomError("Pass the briefing quiz first: call answer_quiz.")
+        vessel = get_task(st.task_id).kind == "vessel"
+        ops = [e.get("op") if isinstance(e, dict) else None for e in cmd["edits"]] if cmd["op"] == "batch" else [cmd["op"]]
+        if vessel and any(op not in VESSEL_OPS for op in ops):
+            raise AxiomError("This is a vessel task: edit it with shape_profile and paint_band.")
+        if not vessel and any(op in VESSEL_OPS for op in ops):
+            raise AxiomError("shape_profile and paint_band are for vessel tasks; this task animates the mannequin.")
+        help_text = VESSEL_EXPECT_HELP if vessel else EXPECT_HELP
         if st.protocol and st.pending_discrepancy and not dry_run:
             raise AxiomError(
                 "Your last edit broke a prediction. Before editing again, call undo() to revert it, or "
@@ -282,12 +336,12 @@ class Workbench:
             except PredictionError as e:
                 st.ledger["rejected_edits"] += 1
                 save(st, self.home)
-                raise AxiomError(f"{e}\n{EXPECT_HELP}") from None
+                raise AxiomError(f"{e}\n{help_text}") from None
             if not predictions or not any(is_precise(p) for p in predictions):
                 st.ledger["rejected_edits"] += 1
                 save(st, self.home)
                 why = "No expect given." if not predictions else "None of your predictions is precise."
-                raise AxiomError(f"{why} {EXPECT_HELP}")
+                raise AxiomError(f"{why} {help_text}")
         before, states_before = self._rebuild(st)
         try:
             clip = apply_command(self.skel, before, cmd)
@@ -302,15 +356,17 @@ class Workbench:
                 old = evaluate_prediction(p, self.skel, before, states_before, frame)
                 graded.append((p, new, new.measured != old.measured))
         except PredictionError as e:
-            raise AxiomError(f"{e}\n{EXPECT_HELP}") from None
-        if st.protocol and not _same_scene(states_before, states) and not any(
-                changed and is_precise(p) for p, _, changed in graded):
+            raise AxiomError(f"{e}\n{help_text}") from None
+        changed_scene = not _same_scene(states_before, states) or before.vessel != clip.vessel
+        if st.protocol and changed_scene and not any(changed and is_precise(p) for p, _, changed in graded):
             st.ledger["rejected_edits"] += 1
             save(st, self.home)
+            example = ("e.g. color(h) is <colour> inside a painted band, or a measurement this shape changes"
+                       if vessel else f"e.g. the moved point or angle at the edited frame (@{frame}) or at another "
+                                      "frame it affects")
             raise AxiomError(
                 "None of your precise predictions measures something this edit changes, so it can't show you "
-                "understood the edit. Predict its effect, e.g. the moved point or angle at the edited frame "
-                f"(@{frame}) or at another frame it affects. {EXPECT_HELP}"
+                f"understood the edit. Predict its effect, {example}. {help_text}"
             )
 
         key = hashlib.sha256(json.dumps(cmd, sort_keys=True, default=str).encode()).hexdigest()
@@ -383,6 +439,17 @@ class Workbench:
                    session: str | None = None) -> ToolResult:
         return self._edit({"op": "swing_foot", "side": side, "start": start, "end": end, "apex": apex},
                           expect, session, dry_run)
+
+    @_locked
+    def shape_profile(self, points, wall: float = 0.006, expect=None, dry_run: bool = False,
+                      session: str | None = None) -> ToolResult:
+        """Replace the vessel's side profile: [height, radius] points from the base up."""
+        return self._edit({"op": "shape_profile", "points": points, "wall": wall}, expect, session, dry_run)
+
+    @_locked
+    def paint_band(self, start, end, color, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:
+        """Paint heights start..end one colour; later bands cover earlier ones."""
+        return self._edit({"op": "paint_band", "start": start, "end": end, "color": color}, expect, session, dry_run)
 
     @_locked
     def batch(self, edits, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:

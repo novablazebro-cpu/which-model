@@ -23,7 +23,7 @@ class CheckContext:
     skel: object
     clip: object
     states: list
-    kind: Literal["step", "walk", "pose"]
+    kind: Literal["step", "walk", "pose", "vessel"]
 
 
 REGISTRY: dict[str, Callable[[CheckContext], list[CheckResult]]] = {}
@@ -53,6 +53,11 @@ def frames_text(frames: list[int]) -> str:
 
 
 def run_checks(ctx: CheckContext) -> list[CheckResult]:
+    if ctx.kind == "vessel":
+        from axiom3d.checks.vessel import vessel_checks
+
+        results = vessel_checks(ctx)
+        return sorted(results, key=lambda r: (SEVERITY_ORDER.index(r.severity), r.id))
     # Importing registers the checks.
     from axiom3d.checks import anatomy, gait, geometry  # noqa: F401
 
