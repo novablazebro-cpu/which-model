@@ -18,7 +18,8 @@ NO_SESSION = ("start_session", "guide")
 
 
 def _home(value: str | None) -> Path:
-    return Path(value or os.environ.get("AXIOM3D_HOME") or ".axiom3d")
+    # Expand "~" ourselves: MCP clients launch servers without a shell.
+    return Path(value or os.environ.get("AXIOM3D_HOME") or ".axiom3d").expanduser()
 
 
 def _call(args) -> int:

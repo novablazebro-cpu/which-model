@@ -58,3 +58,10 @@ def test_guide_topics(home):
     with pytest.raises(KeyError, match="walking"):
         read_topic("dancing")
     assert "flexion" in Workbench(home).guide("conventions").text
+
+
+def test_home_expands_tilde(monkeypatch, tmp_path, capsys):
+    # MCP clients spawn servers without a shell, so "~" in a JSON config arrives literally.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert main(["call", "start_session", "--json", '{"task": "step_forward"}', "--home", "~/.axiom3d"]) == 0
+    assert (tmp_path / ".axiom3d" / "current").exists()
