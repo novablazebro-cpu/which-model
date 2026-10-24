@@ -112,8 +112,7 @@ def make_quiz(skel, clip, seed: int) -> list[Question]:
 _SYNONYMS = {
     "front": "front", "forward": "front", "forwards": "front", "in front": "front",
     "back": "back", "backward": "back", "backwards": "back", "behind": "back",
-    "left": "left", "right": "right",
-    "in_front": "in_front", "in front": "in_front", "infront": "in_front", "front_of": "in_front",
+    "left": "left", "right": "right", "in_front": "front",
 }
 
 

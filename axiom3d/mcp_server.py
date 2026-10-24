@@ -37,7 +37,7 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
         return _reply(lambda: wb.start_session(task))
 
     @tool
-    def answer_quiz(answers: dict[str, str]) -> list | str:
+    def answer_quiz(answers: dict[str, str | float]) -> list | str:
         """Answer the briefing quiz, e.g. {"q1": "-Y", "q2": "+X", "q3": "behind", "q4": "front", "q5": "0.50"}."""
         return _reply(lambda: wb.answer_quiz(answers))
 
@@ -47,9 +47,9 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
         return _reply(lambda: wb.guide(topic))
 
     @tool
-    def observe(frames: list[int] | None = None, views: list[str] | None = None) -> list | str:
+    def observe(frames: list[int] | int | None = None, views: list[str] | str | None = None) -> list | str:
         """Measure the scene. views: report, timeline (default both), sheet, filmstrip, footprints (images)."""
-        return _reply(lambda: wb.observe(frames, views))
+        return _reply(lambda: wb.observe(frames, [views] if isinstance(views, str) else views))
 
     @tool
     def check() -> list | str:
@@ -58,23 +58,23 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
 
     @tool
     def set_root(frame: int, forward: float | None = None, left: float | None = None, height: float | None = None,
-                 heading: float | None = None, expect: list[str] | None = None) -> list | str:
+                 heading: float | None = None, expect: list[str] | str | None = None) -> list | str:
         """Key the pelvis at a frame: track forward/left (m), height (m), heading (deg). expect: predictions."""
         return _reply(lambda: wb.set_root(frame, forward, left, height, heading, expect))
 
     @tool
-    def set_pose(frame: int, angles: dict[str, float], expect: list[str] | None = None) -> list | str:
+    def set_pose(frame: int, angles: dict[str, float], expect: list[str] | str | None = None) -> list | str:
         """Key anatomical angles at a frame, e.g. {"left_shoulder.flexion": 15}. expect: predictions."""
         return _reply(lambda: wb.set_pose(frame, angles, expect))
 
     @tool
     def plant_foot(side: str, start: int, end: int, forward: float | None = None, left: float | None = None,
-                   expect: list[str] | None = None) -> list | str:
+                   expect: list[str] | str | None = None) -> list | str:
         """Pin a foot to the ground at track (forward, left) from start to end; the tool solves the leg."""
         return _reply(lambda: wb.plant_foot(side, start, end, forward, left, expect))
 
     @tool
-    def swing_foot(side: str, start: int, end: int, apex: float = 0.08, expect: list[str] | None = None) -> list | str:
+    def swing_foot(side: str, start: int, end: int, apex: float = 0.08, expect: list[str] | str | None = None) -> list | str:
         """Carry a foot in an arc (apex in m) from the plant ending at start to the plant starting at end."""
         return _reply(lambda: wb.swing_foot(side, start, end, apex, expect))
 
@@ -89,7 +89,7 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
         return _reply(lambda: wb.accept_discrepancy(reason))
 
     @tool
-    def finish(claims: list[str]) -> list | str:
+    def finish(claims: list[str] | str) -> list | str:
         """Submit at least 2 claims about the final result. Certifies only if every check, criterion and claim passes."""
         return _reply(lambda: wb.finish(claims))
 

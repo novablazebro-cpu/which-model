@@ -71,3 +71,10 @@ def test_q5_is_sine(skel):
     q5 = quiz(skel, 9)[4]
     theta = float(q5.text.split("+")[1].split(" ")[0])
     assert np.isclose(float(q5.answer), np.sin(np.radians(theta)), atol=0.005)
+
+
+def test_q4_accepts_in_front_as_front():
+    # Review M1: a duplicate synonym key mapped "in front" to q3's "in_front", failing a correct q4 answer.
+    from axiom3d.protocol.briefing import Question
+    q = Question("q4", "which way", "choice", ("front", "back", "left", "right"), "front", None, "why")
+    assert grade_quiz([q], {"q4": "in front"}).passed and grade_quiz([q], {"q4": "Forward"}).passed

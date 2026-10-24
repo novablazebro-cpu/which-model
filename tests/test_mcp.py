@@ -39,3 +39,21 @@ def test_mcp_end_to_end(home):
                 assert "CERTIFIED" in done and "NOT CERTIFIED" not in done
 
     anyio.run(run)
+
+
+def test_mcp_accepts_lenient_arguments(home):
+    # Review M2: models send numbers for q5, a bare frame number, or one prediction as a string.
+    from axiom3d.mcp_server import build_server
+
+    async def run():
+        server = build_server(home)
+        await server.call_tool("start_session", {"task": "step_forward"})
+        quiz = load(current_id(home), home).quiz
+        answers = {q["id"]: (float(q["answer"]) if q["id"] == "q5" else q["answer"]) for q in quiz}
+        assert "PASSED" in str(await server.call_tool("answer_quiz", {"answers": answers}))
+        assert "POINTS" in str(await server.call_tool("observe", {"frames": 24}))
+        out = str(await server.call_tool("set_pose", {"frame": 12, "angles": {"left_shoulder.flexion": 20},
+                                                      "expect": "left_shoulder.flexion@12 ~= 20 ± 1"}))
+        assert "APPLIED" in out
+
+    anyio.run(run)
