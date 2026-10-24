@@ -80,3 +80,10 @@ def test_malformed_and_no_eval(skel):
 def test_frame_outside_timeline(skel, step):
     with pytest.raises(PredictionError, match="0..24"):
         check(skel, step, "left_toe.z < 0.1 @99")
+
+
+def test_self_comparisons_rejected(skel):
+    # Review I3: tautologies used to count as precise predictions.
+    for bad in ["pelvis.z >= pelvis.z", "left_hip.flexion <= left_hip.flexion", "left_toe in_front_of left_toe"]:
+        with pytest.raises(PredictionError, match="itself"):
+            parse_prediction(bad, skel)

@@ -24,13 +24,18 @@ or `accept_discrepancy(reason)` before the next edit.
 
 ## Frames
 Add `@12`, `@0..24` or `@all` after the subject or at the end.
-Without one, an edit's predictions use the edited frame (the end frame for
-plant_foot and swing_foot), and metrics use the whole timeline.
+Without one, an edit's predictions use the edited frame (the last frame for
+plant_foot, the middle frame for swing_foot), and metrics use the whole timeline.
+
+At least one precise prediction must measure something **the edit changes**.
+A prediction that's true whether or not you make the edit (for example
+`head_top above left_toe`) shows nothing; it is marked UNCHANGED and not
+counted. Comparing a value with itself is rejected.
 
 ## Precise means
 - `~=` with a tolerance of at most 0.15 m (20 deg for angles and heading)
 - `in [a, b]` with a width of at most 0.15 m (20 deg)
-- any relation (`in_front_of`, `on_ground`, ...) or a subject-vs-subject comparison
+- any relation (`in_front_of`, `on_ground`, ...) or a comparison between two different subjects
 - `slide(...) < v` with v of at most 0.05
 
 ## Examples

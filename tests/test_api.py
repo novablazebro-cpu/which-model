@@ -1,8 +1,8 @@
 import pytest
 
 from axiom3d.api import AxiomError, Workbench
+from axiom3d.eval.agents import correct_script
 from axiom3d.session_store import current_id, load
-from axiom3d.tasks.reference import reference_commands
 
 TRUE = ["root.heading ~= 0 ± 1"]  # always true for step_forward, and precise
 
@@ -18,9 +18,10 @@ def pass_quiz(wb, home):
     return wb.answer_quiz({q["id"]: q["answer"] for q in st.quiz})
 
 
-def edit(wb, cmd, expect):
-    args = {k: v for k, v in cmd.items() if k != "op"}
-    return getattr(wb, cmd["op"])(**args, expect=expect)
+def solve_reference(wb, task="step_forward"):
+    # The honest scripted agent's edits: each carries predictions computed by simulating the edit.
+    for tool, kwargs in correct_script(task)[2:-1]:
+        getattr(wb, tool)(**kwargs)
 
 
 def test_start_session_text(home):
@@ -79,12 +80,11 @@ def test_failed_prediction_blocks_next_edit(home):
 def test_finish_blocked_by_errors_then_certified(home):
     wb = started(home)
     pass_quiz(wb, home)
-    wb.set_pose(frame=12, angles={"left_knee.flexion": -20}, expect=TRUE)
+    wb.set_pose(frame=12, angles={"left_knee.flexion": -20}, expect=["left_knee.flexion@12 ~= -20 ± 1"])
     res = wb.finish(["root.heading ~= 0 ± 1", "slide(right_heel) < 0.02"])
     assert "NOT CERTIFIED" in res.text and "anatomy.joint_limits" in res.text
     wb.undo()
-    for cmd in reference_commands("step_forward"):
-        edit(wb, cmd, TRUE)
+    solve_reference(wb)
     res = wb.finish(["left_ankle.forward@24 ~= 0.36 ± 0.02", "slide(right_heel) < 0.02"])
     assert "CERTIFIED" in res.text and "NOT CERTIFIED" not in res.text
     st = load(current_id(home), home)
@@ -94,8 +94,7 @@ def test_finish_blocked_by_errors_then_certified(home):
 def test_finish_needs_two_claims(home):
     wb = started(home)
     pass_quiz(wb, home)
-    for cmd in reference_commands("step_forward"):
-        edit(wb, cmd, TRUE)
+    solve_reference(wb)
     res = wb.finish(["slide(right_heel) < 0.02"])
     assert "NOT CERTIFIED" in res.text and "at least 2 claims" in res.text
 
@@ -129,8 +128,7 @@ def test_wrong_phase_messages(home):
     with pytest.raises(AxiomError, match="undo"):
         wb.finish(["a", "b"])
     wb.undo()
-    for cmd in reference_commands("step_forward"):
-        edit(wb, cmd, TRUE)
+    solve_reference(wb)
     wb.finish(["left_ankle.forward@24 ~= 0.36 ± 0.02", "slide(right_heel) < 0.02"])
     with pytest.raises(AxiomError, match="finished"):
         wb.set_root(frame=0, height=0.9, expect=TRUE)
@@ -164,9 +162,42 @@ def test_observe_text_and_images(home):
 def test_check_lists_hints_only_in_protocol(home):
     wb = started(home)
     pass_quiz(wb, home)
-    wb.set_pose(frame=12, angles={"left_knee.flexion": -20}, expect=TRUE)
+    wb.set_pose(frame=12, angles={"left_knee.flexion": -20}, expect=["left_knee.flexion@12 ~= -20 ± 1"])
     assert "hint:" in wb.check().text
     bare = started(home, protocol=False)
     bare.set_pose(frame=12, angles={"left_knee.flexion": -20})
     text = bare.check().text
     assert "anatomy.joint_limits" in text and "hint:" not in text
+
+
+def test_gate_needs_a_prediction_the_edit_changes(home):
+    # Review I3: a true-but-unaffected prediction ("head_top above left_toe") must not unlock an edit.
+    wb = started(home)
+    pass_quiz(wb, home)
+    with pytest.raises(AxiomError, match="changes"):
+        wb.set_pose(frame=12, angles={"left_shoulder.flexion": 20}, expect=["head_top above left_toe"])
+    st = load(current_id(home), home)
+    assert st.commands == [] and st.ledger["rejected_edits"] == 1
+    res = wb.set_pose(frame=12, angles={"left_shoulder.flexion": 20},
+                      expect=["head_top above left_toe", "left_shoulder.flexion@12 ~= 20 ± 1"])
+    assert "UNCHANGED" in res.text and "PASS" in res.text
+    st = load(current_id(home), home)
+    assert st.ledger["predictions_total"] == 1 and st.ledger["predictions_correct"] == 1
+
+
+def test_noop_edit_needs_no_relevant_prediction(home):
+    wb = started(home)
+    pass_quiz(wb, home)
+    res = wb.set_pose(frame=0, angles={"left_shoulder.flexion": 0}, expect=["left_shoulder.flexion@0 ~= 0 ± 1"])
+    assert res.text.startswith("APPLIED")
+
+
+def test_swing_predictions_default_to_mid_swing(home):
+    wb = started(home)
+    pass_quiz(wb, home)
+    for tool, kwargs in correct_script("step_forward")[2:-1]:  # everything except the swing, plants on both sides
+        if tool != "swing_foot":
+            getattr(wb, tool)(**kwargs)
+    res = wb.swing_foot(side="left", start=6, end=18, apex=0.08, expect=["max_height(left_ankle) ~= 0.148 ± 0.01",
+                                                                          "left_ankle.z ~= 0.148 ± 0.005"])
+    assert res.text.count("PASS") == 2, res.text

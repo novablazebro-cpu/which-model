@@ -33,9 +33,11 @@ def _honest_expect(skel, clip, cmd: dict) -> list[str]:
     if cmd["op"] == "set_pose":
         f = int(cmd["frame"])
         return [f"{ch}@{f} ~= {states[f - first].angles[ch]:.1f} ± 1" for ch in cmd["angles"]]
-    end, side = int(cmd["end"]), cmd["side"]
-    fwd, _ = track_coords(clip, states[end - first].points[f"{side}_ankle"][:2])
-    return [f"{side}_ankle.forward@{end} ~= {fwd:.3f} ± 0.02"]
+    side = cmd["side"]
+    f = (int(cmd["start"]) + int(cmd["end"])) // 2 if cmd["op"] == "swing_foot" else int(cmd["end"])
+    ankle = states[f - first].points[f"{side}_ankle"]
+    fwd, _ = track_coords(clip, ankle[:2])
+    return [f"{side}_ankle.forward@{f} ~= {fwd:.3f} ± 0.02", f"{side}_ankle.z@{f} ~= {ankle[2]:.3f} ± 0.01"]
 
 
 def correct_script(task_id: str) -> list[Step]:

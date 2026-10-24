@@ -140,6 +140,8 @@ def parse_prediction(text: str, skel) -> Prediction:
         return Prediction("relation", "on_ground", point=_point(m.group(1), skel), frames=frames, text=text)
     m = re.fullmatch(rf"([a-z_]+) ({'|'.join(RELATIONS)}) ([a-z_]+)", body)
     if m:
+        if m.group(1) == m.group(3):
+            raise PredictionError(f"{text!r} compares {m.group(1)} with itself; predict something the edit changes")
         return Prediction("relation", m.group(2), point=_point(m.group(1), skel),
                           other_point=_point(m.group(3), skel), frames=frames, text=text)
     m = re.fullmatch(rf"({_SUBJ}) in \[\s*({_NUM})\s*,\s*({_NUM})\s*\]", body)
@@ -160,6 +162,8 @@ def parse_prediction(text: str, skel) -> Prediction:
     m = re.fullmatch(rf"({_SUBJ}) ?(<=|>=|<|>) ?({_SUBJ})", body)
     if m:
         subj, other = _subject(m.group(1), skel), _subject(m.group(3), skel)
+        if subj == other:
+            raise PredictionError(f"{text!r} compares {m.group(1)} with itself; predict something the edit changes")
         return Prediction("compare", m.group(2), subj, other=other, frames=frames, text=text)
     raise PredictionError(
         f"can't parse {text!r}. Examples: 'left_toe.forward ~= 0.36 ± 0.05', 'left_toe in_front_of pelvis @24', "

@@ -5,7 +5,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from axiom3d.session_store import current_id, load
-from axiom3d.tasks.reference import reference_commands
+from axiom3d.eval.agents import correct_script
 
 TOOLS = {"start_session", "answer_quiz", "guide", "observe", "check", "set_root", "set_pose", "plant_foot",
          "swing_foot", "undo", "accept_discrepancy", "finish", "export"}
@@ -27,9 +27,8 @@ def test_mcp_end_to_end(home):
                 st = load(current_id(home), home)
                 quiz = texts(await s.call_tool("answer_quiz", {"answers": {q["id"]: q["answer"] for q in st.quiz}}))
                 assert "PASSED" in quiz
-                for cmd in reference_commands("step_forward"):
-                    args = {k: v for k, v in cmd.items() if k != "op"}
-                    out = texts(await s.call_tool(cmd["op"], {**args, "expect": ["root.heading ~= 0 ± 1"]}))
+                for tool, args in correct_script("step_forward")[2:-1]:
+                    out = texts(await s.call_tool(tool, args))
                     assert out.startswith("APPLIED"), out
                 bad = texts(await s.call_tool("set_pose", {"frame": 3, "angles": {"left_knee.flexion": 10}}))
                 assert bad.startswith("ERROR:") and "~=" in bad

@@ -45,6 +45,19 @@ class ToolResult:
     images: list[tuple[str, bytes]] = field(default_factory=list)
 
 
+def _prediction_frame(cmd: dict) -> int:
+    """Where an edit's predictions are measured by default: the keyed frame, a plant's last frame, mid-swing."""
+    if cmd["op"] in ("set_root", "set_pose"):
+        return int(float(cmd["frame"]))
+    if cmd["op"] == "swing_foot":
+        return (int(float(cmd["start"])) + int(float(cmd["end"]))) // 2
+    return int(float(cmd["end"]))
+
+
+def _same_scene(a, b) -> bool:
+    return all(np.allclose(sa.points[k], sb.points[k], atol=1e-9) for sa, sb in zip(a, b) for k in sa.points)
+
+
 def _describe(cmd: dict) -> str:
     args = ", ".join(f"{k}={v}" for k, v in cmd.items() if k != "op")
     return f"{cmd['op']}({args})"
@@ -195,7 +208,7 @@ class Workbench:
         return ToolResult(self._finish_text(st, lines, clip, states))
 
     # ---- editing -------------------------------------------------------------------------------
-    def _edit(self, cmd: dict, expect, session: str | None, frame_key: str) -> ToolResult:
+    def _edit(self, cmd: dict, expect, session: str | None) -> ToolResult:
         st = self._load(session)
         if st.phase == "DONE":
             raise AxiomError("Session is finished; start a new one.")
@@ -220,28 +233,44 @@ class Workbench:
                 save(st, self.home)
                 why = "No expect given." if not predictions else "None of your predictions is precise."
                 raise AxiomError(f"{why} {EXPECT_HELP}")
-        clip, _ = rebuild(st, self.skel)
+        before, states_before = rebuild(st, self.skel)
         try:
-            clip = apply_command(self.skel, clip, cmd)
+            clip = apply_command(self.skel, before, cmd)
         except CommandError as e:
             raise AxiomError(str(e)) from None
         states = evaluate_clip(self.skel, clip)
-        frame = int(float(cmd[frame_key]))
-        outcomes = []
+        frame = _prediction_frame(cmd)
+        graded = []
         try:
-            outcomes = [(p, evaluate_prediction(p, self.skel, clip, states, frame)) for p in predictions]
+            for p in predictions:
+                new = evaluate_prediction(p, self.skel, clip, states, frame)
+                old = evaluate_prediction(p, self.skel, before, states_before, frame)
+                graded.append((p, new, new.measured != old.measured))
         except PredictionError as e:
             raise AxiomError(f"{e}\n{EXPECT_HELP}") from None
+        if st.protocol and not _same_scene(states_before, states) and not any(
+                changed and is_precise(p) for p, _, changed in graded):
+            st.ledger["rejected_edits"] += 1
+            save(st, self.home)
+            raise AxiomError(
+                "None of your precise predictions measures something this edit changes, so it can't show you "
+                "understood the edit. Predict its effect, e.g. the moved point or angle at the edited frame "
+                f"(@{frame}) or at another frame it affects. {EXPECT_HELP}"
+            )
 
         st.commands.append(cmd)
         st.ledger["edits"] += 1
         lines = [f"APPLIED: {_describe(cmd)}"]
-        if outcomes:
-            st.ledger["predictions_total"] += len(outcomes)
-            st.ledger["predictions_correct"] += sum(o.passed for _, o in outcomes)
+        if graded:
+            # A true prediction about something the edit didn't touch carries no information; it isn't counted.
+            counted = [(p, o) for p, o, changed in graded if changed or not o.passed]
+            st.ledger["predictions_total"] += len(counted)
+            st.ledger["predictions_correct"] += sum(o.passed for _, o in counted)
             lines.append("PREDICTIONS (measured by the tool):")
-            lines += [f"  {'PASS' if o.passed else 'FAIL'}  {p.text}   (measured: {o.measured})" for p, o in outcomes]
-            failed = [p.text for p, o in outcomes if not o.passed]
+            for p, o, changed in graded:
+                status = ("PASS" if o.passed else "FAIL") if changed or not o.passed else "UNCHANGED (true but not affected by this edit; not counted)"
+                lines.append(f"  {status}  {p.text}   (measured: {o.measured})")
+            failed = [p.text for p, o, _ in graded if not o.passed]
             if failed:
                 st.ledger["discrepancies"] += 1
                 st.pending_discrepancy = {"command": len(st.commands) - 1, "failed": failed}
@@ -260,19 +289,19 @@ class Workbench:
         cmd = {"op": "set_root", "frame": frame}
         cmd.update({k: v for k, v in (("forward", forward), ("left", left), ("height", height), ("heading", heading))
                     if v is not None})
-        return self._edit(cmd, expect, session, "frame")
+        return self._edit(cmd, expect, session)
 
     def set_pose(self, frame, angles: dict, expect=None, session: str | None = None) -> ToolResult:
-        return self._edit({"op": "set_pose", "frame": frame, "angles": angles}, expect, session, "frame")
+        return self._edit({"op": "set_pose", "frame": frame, "angles": angles}, expect, session)
 
     def plant_foot(self, side, start, end, forward=None, left=None, expect=None, session: str | None = None) -> ToolResult:
         cmd = {"op": "plant_foot", "side": side, "start": start, "end": end}
         cmd.update({k: v for k, v in (("forward", forward), ("left", left)) if v is not None})
-        return self._edit(cmd, expect, session, "end")
+        return self._edit(cmd, expect, session)
 
     def swing_foot(self, side, start, end, apex=0.08, expect=None, session: str | None = None) -> ToolResult:
         return self._edit({"op": "swing_foot", "side": side, "start": start, "end": end, "apex": apex},
-                          expect, session, "end")
+                          expect, session)
 
     # ---- recovery ------------------------------------------------------------------------------
     def undo(self, session: str | None = None) -> ToolResult:
