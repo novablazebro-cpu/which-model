@@ -10,6 +10,7 @@ from axiom3d.model.vessel import (
     color_name,
     measure_obj,
     measure_spec,
+    radius_at,
     parse_color,
     sample_profile,
     vessel_mesh,
@@ -91,3 +92,14 @@ def test_colour_parsing():
     assert parse_color("#AABBCC") == "#aabbcc" and parse_color("Blue") == parse_color("blue")
     with pytest.raises(VesselError, match="red"):
         parse_color("ultraviolet")
+
+
+def test_the_curve_never_leans_steeper_than_your_end_segments():
+    # The three-point end slope drew a 31 deg skirt at the base where the points asked for 20.6 deg
+    # (the after-fix protocol run of 2026-10-25): the tool exaggerated every foot flare by about half.
+    pts = ((0.0, 0.060), (0.04, 0.045), (0.10, 0.058), (0.28, 0.105), (0.36, 0.018), (0.40, 0.024))
+    s, eps = VesselSpec(pts, 0.006, ()), 1e-5
+    base = np.degrees(np.arctan2(radius_at(s, 0.0) - radius_at(s, eps), eps))  # the tangent at the base
+    top = np.degrees(np.arctan2(radius_at(s, 0.40) - radius_at(s, 0.40 - eps), eps))
+    assert base == pytest.approx(np.degrees(np.arctan2(0.015, 0.04)), abs=0.05)
+    assert top == pytest.approx(np.degrees(np.arctan2(0.006, 0.04)), abs=0.05)

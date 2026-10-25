@@ -224,14 +224,14 @@ def _tag(draw: ImageDraw.ImageDraw, xy, text: str, font, fill=INK) -> None:
 
 
 def _vessel_side(spec, m, size: int) -> Image.Image:
-    from axiom3d.model.vessel import vessel_mesh
+    from axiom3d.model.vessel import display_mesh
 
     height, rmax = m.height, m.max_diameter / 2
     half = max(0.62 * height, 1.45 * rmax)
     centre = 0.47 * height  # a little headroom for the title
     cam = Camera("SIDE (looking +Y; up = +Z)", np.array([0.0, -3.0, centre]), np.array([0.0, 0.0, centre]),
                  np.array([0.0, 0.0, 1.0]), ortho_half_height=half)
-    mesh, vcol = vessel_mesh(spec, segments=32)
+    mesh, vcol = display_mesh(spec, segments=32)  # one colour per triangle: band edges stay sharp
     v = mesh.vertices.astype(float)
     tris = v[mesh.faces]
     normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])

@@ -17,6 +17,8 @@ The tool joins your points with a smooth monotone curve:
 - It never bulges past your points. The widest point of the vessel is your
   point with the largest radius, at exactly that height. The narrowest is your
   point with the smallest radius.
+- At the base and the mouth it leans exactly as steeply as your first and last segments: a foot
+  that drops 15 mm over its first 40 mm flares at 20.6°, no more. A deep pinch makes a skirt.
 - So put a point exactly where you want the widest point, the waist and the
   neck, and use a few points in between to shape the curves.
 

@@ -154,17 +154,9 @@ def validate(spec: VesselSpec) -> tuple[np.ndarray, np.ndarray]:
     return h, r
 
 
-def _edge_slope(h0: float, h1: float, d0: float, d1: float) -> float:
-    m = ((2 * h0 + h1) * d0 - h0 * d1) / (h0 + h1)
-    if np.sign(m) != np.sign(d0):
-        return 0.0
-    if np.sign(d0) != np.sign(d1) and abs(m) > 3 * abs(d0):
-        return 3 * d0
-    return m
-
-
 def _pchip(x: np.ndarray, y: np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
-    """Monotone cubic interpolation (Fritsch-Carlson): never overshoots the points."""
+    """Monotone cubic interpolation (Fritsch-Carlson): never overshoots the points, and the ends lean no
+    steeper than the first and last segments."""
     hk = np.diff(x)
     d = np.diff(y) / hk
     m = np.zeros(len(x))
@@ -172,8 +164,9 @@ def _pchip(x: np.ndarray, y: np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
         if d[k - 1] * d[k] > 0:
             w1, w2 = 2 * hk[k] + hk[k - 1], hk[k] + 2 * hk[k - 1]
             m[k] = (w1 + w2) / (w1 / d[k - 1] + w2 / d[k])
-    m[0] = _edge_slope(hk[0], hk[1], d[0], d[1])
-    m[-1] = _edge_slope(hk[-1], hk[-2], d[-1], d[-2])
+    # Ends take their own segment's slope. The usual three-point end formula extrapolates the next
+    # segment and drew a 31 deg skirt where the points asked for 20.6 deg.
+    m[0], m[-1] = d[0], d[-1]
 
     def f(q):
         q = np.clip(np.asarray(q, dtype=float), x[0], x[-1])
@@ -238,6 +231,55 @@ def vessel_mesh(spec: VesselSpec, segments: int = SEGMENTS) -> tuple[Mesh, np.nd
     colors = np.concatenate([[_rgb(spec.color_at(0.0))], np.repeat(ring_rgb, s, axis=0), [white]])
     mesh = Mesh(verts.astype(np.float32), np.concatenate(faces).astype(np.int32))
     return mesh, colors.astype(np.float32)
+
+
+def display_mesh(spec: VesselSpec, segments: int = SEGMENTS) -> tuple[Mesh, np.ndarray]:
+    """The same closed shape as vessel_mesh, built for viewing and export.
+
+    Vertices are split at the sharp corners (base edge, lip, inner floor) and at band edges, so smooth
+    normals stay crisp there and every triangle has one colour. With one shared ring, the base edge's
+    normals pointed ~84 deg down and viewers shaded it as a dark smear. Welded by position it is still
+    watertight; files that must be watertight by index (OBJ, printing) use vessel_mesh.
+    """
+    h, r = sample_profile(spec)
+    radius = _pchip(*validate(spec))
+    wall = spec.wall
+    inner_h = np.concatenate([[wall], h[h > wall + 1e-6]])
+    inner_r = np.maximum(radius(inner_h) - wall, MIN_INNER)
+    white = _rgb(DEFAULT_COLOR)
+    paint = [spec.color_at((a + b) / 2) for a, b in zip(h, h[1:])]  # band edges are sample heights
+    strips, start = [], 0
+    for i in range(1, len(paint) + 1):
+        if i == len(paint) or paint[i] != paint[start]:
+            strips.append((h[start:i + 1], r[start:i + 1], _rgb(paint[start])))
+            start = i
+    strips.append(([h[-1], h[-1]], [r[-1], inner_r[-1]], _rgb(spec.color_at(h[-1]))))  # the lip
+    strips.append((inner_h[::-1], inner_r[::-1], white))  # the inside, top to floor
+
+    j = np.arange(segments)
+    j2 = (j + 1) % segments
+    verts, cols, faces = [], [], []
+
+    def add(points, rgb) -> int:
+        first = sum(len(v) for v in verts)
+        verts.append(points)
+        cols.append(np.repeat([rgb], len(points), axis=0))
+        return first
+
+    foot_rgb = _rgb(spec.color_at(0.0))
+    centre = add(np.zeros((1, 3)), foot_rgb)
+    base = add(_rings(np.array([r[0]]), np.array([0.0]), segments), foot_rgb)
+    faces.append(np.stack([np.full(segments, centre), base + j2, base + j], axis=1))
+    for hs, rs, rgb in strips:
+        first = add(_rings(np.asarray(rs, float), np.asarray(hs, float), segments), rgb)
+        for i in range(len(hs) - 1):
+            p, q = first + i * segments, first + (i + 1) * segments
+            faces += [np.stack([p + j, p + j2, q + j2], axis=1), np.stack([p + j, q + j2, q + j], axis=1)]
+    floor = add(_rings(np.array([inner_r[0]]), np.array([wall]), segments), white)
+    pole = add(np.array([[0.0, 0.0, wall]]), white)
+    faces.append(np.stack([floor + j, floor + j2, np.full(segments, pole)], axis=1))
+    mesh = Mesh(np.concatenate(verts).astype(np.float32), np.concatenate(faces).astype(np.int32))
+    return mesh, np.concatenate(cols).astype(np.float32)
 
 
 def _com_height(verts: np.ndarray, faces: np.ndarray) -> float:
