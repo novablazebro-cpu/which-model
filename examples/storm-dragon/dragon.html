@@ -1,0 +1,639 @@
+<title>Storm Dragon</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=Source+Sans+3:wght@400;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: one full-bleed storm; the dragon is the page. A small engraved caption top-left, three controls bottom-right.
+   Deliberately a single dark look: the subject is a night storm. */
+:root {
+  --sky: #121a21;
+  --ink: #e9edf0;
+  --muted: #9eabb5;
+  --glow: #8dff63;
+  --panel: rgba(10, 15, 20, 0.62);
+  --line: rgba(233, 237, 240, 0.18);
+  --display: "IM Fell English SC", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--sky); color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; }
+#stage { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+#stage:active { cursor: grabbing; }
+#stage:focus-visible { outline: 2px solid var(--glow); outline-offset: -2px; }
+.cap {
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + 16px);
+  left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 6px; max-width: 46ch; pointer-events: none;
+}
+h1 { margin: 0; font: 400 clamp(1.9rem, 5.5vw, 3rem)/1 var(--display); letter-spacing: 0.02em; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.7); }
+.cap p { margin: 0; color: var(--muted); font-size: 0.92rem; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.stats { font: 400 0.72rem/1.4 var(--mono) !important; letter-spacing: 0.04em; }
+.bar {
+  position: fixed; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; pointer-events: none;
+}
+.bar button {
+  pointer-events: auto; font: 600 0.82rem/1 var(--body); color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); padding: 10px 14px; border-radius: 999px; cursor: pointer;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.bar button[aria-pressed="true"] { border-color: var(--glow); color: var(--glow); }
+.bar button:focus-visible { outline: 2px solid var(--glow); outline-offset: 2px; }
+.loading { position: fixed; inset: 0; display: grid; place-items: center; color: var(--muted); font: 400 0.85rem var(--mono); pointer-events: none; }
+</style>
+
+<canvas id="stage" tabindex="0" aria-label="A purple storm dragon on a rock spire, breathing green fire. Drag to turn it, pinch or scroll to zoom."></canvas>
+<div class="loading" id="loading">raising the storm…</div>
+<header class="cap">
+  <h1>Storm Dragon</h1>
+  <p>Built entirely from code: a swept spine, bat wings on finger bones, horns, claws and a rock spire. Drag to circle it.</p>
+  <p class="stats" id="stats"></p>
+</header>
+<div class="bar" role="toolbar" aria-label="View controls">
+  <button type="button" id="turn" aria-pressed="true">Auto-turn</button>
+  <button type="button" id="storm" aria-pressed="true">Storm</button>
+  <button type="button" id="reset">Reset view</button>
+</div>
+
+<script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const UP = V(0, 1, 0);
+const col = (hex) => new THREE.Color(hex);
+
+// ---- deterministic randomness ---------------------------------------------------------------
+function mulberry32(a) {
+  return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const rand = mulberry32(7);
+const smooth = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+function keyed(keys, t) {  // keys: [[t, value], ...] sorted; smooth interpolation, numbers or objects of numbers
+  if (t <= keys[0][0]) return keys[0][1];
+  for (let i = 1; i < keys.length; i++) {
+    if (t <= keys[i][0]) {
+      const [t0, a] = keys[i - 1], [t1, b] = keys[i];
+      const u = smooth(0, 1, (t - t0) / (t1 - t0));
+      if (typeof a === "number") return a + (b - a) * u;
+      const out = {};
+      for (const k in a) out[k] = a[k] + (b[k] - a[k]) * u;
+      return out;
+    }
+  }
+  return keys[keys.length - 1][1];
+}
+
+// ---- textures -------------------------------------------------------------------------------
+function scaleTexture() {  // overlapping scales as a bump map
+  const s = 256, c = document.createElement("canvas"); c.width = c.height = s;
+  const g = c.getContext("2d");
+  g.fillStyle = "#808080"; g.fillRect(0, 0, s, s);
+  const rows = 10, cols = 10, w = s / cols, h = s / rows, jitter = mulberry32(11);
+  for (let r = -1; r <= rows; r++) {
+    for (let k = -1; k <= cols; k++) {
+      const x = k * w + (r % 2 ? w / 2 : 0) + (jitter() - 0.5) * w * 0.12, y = r * h + (jitter() - 0.5) * h * 0.12;
+      const grad = g.createRadialGradient(x + w / 2, y + h * 0.15, 1, x + w / 2, y + h * 0.35, w * 0.75);
+      grad.addColorStop(0, "#d8d8d8"); grad.addColorStop(0.7, "#8a8a8a"); grad.addColorStop(1, "#2a2a2a");
+      g.fillStyle = grad;
+      g.beginPath(); g.ellipse(x + w / 2, y + h * 0.35, w * 0.56, h * 0.78, 0, 0, Math.PI * 2); g.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
+  return t;
+}
+function skyTexture() {
+  const c = document.createElement("canvas"); c.width = 512; c.height = 512;
+  const g = c.getContext("2d");
+  const sky = g.createLinearGradient(0, 0, 0, 512);
+  sky.addColorStop(0, "#0d141b"); sky.addColorStop(0.45, "#26343f"); sky.addColorStop(0.75, "#4a5963"); sky.addColorStop(1, "#5f6b70");
+  g.fillStyle = sky; g.fillRect(0, 0, 512, 512);
+  const r = mulberry32(3);
+  for (let i = 0; i < 70; i++) {  // storm clouds
+    const x = r() * 512, y = r() * 330, rad = 40 + r() * 120;
+    const cl = g.createRadialGradient(x, y, 0, x, y, rad);
+    const a = 0.06 + r() * 0.1, light = r() < 0.35;
+    cl.addColorStop(0, light ? `rgba(150,170,185,${a})` : `rgba(6,10,14,${a + 0.05})`);
+    cl.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = cl; g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function glowTexture() {
+  const c = document.createElement("canvas"); c.width = c.height = 128;
+  const g = c.getContext("2d");
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, "rgba(220,255,200,1)"); gr.addColorStop(0.25, "rgba(140,255,90,0.85)");
+  gr.addColorStop(0.6, "rgba(60,200,40,0.25)"); gr.addColorStop(1, "rgba(0,80,0,0)");
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+
+// ---- geometry: swept tubes with parallel-transport frames -------------------------------------
+function frames(P, up, ref) {
+  const n = P.length;
+  const T = P.map((p, i) => P[Math.min(n - 1, i + 1)].clone().sub(P[Math.max(0, i - 1)]).normalize());
+  const N = [], B = [];
+  if (ref) {  // anchored frames: the dorsal side follows a reference direction, so it never twists away
+    for (let i = 0; i < n; i++) {
+      const r = ref(T[i]);
+      N.push(r.addScaledVector(T[i], -r.dot(T[i])).normalize());
+      B.push(new THREE.Vector3().crossVectors(T[i], N[i]).normalize());
+    }
+    return { T, N, B };
+  }
+  let nrm = up.clone().addScaledVector(T[0], -up.dot(T[0]));
+  if (nrm.lengthSq() < 1e-8) nrm = V(1, 0, 0).addScaledVector(T[0], -T[0].x);
+  nrm.normalize();
+  for (let i = 0; i < n; i++) {
+    if (i > 0) {
+      const axis = new THREE.Vector3().crossVectors(T[i - 1], T[i]);
+      const s = axis.length();
+      if (s > 1e-9) nrm.applyAxisAngle(axis.divideScalar(s), Math.atan2(s, T[i - 1].dot(T[i])));
+      nrm.addScaledVector(T[i], -nrm.dot(T[i])).normalize();
+    }
+    N.push(nrm.clone());
+    B.push(new THREE.Vector3().crossVectors(T[i], nrm).normalize());
+  }
+  return { T, N, B };
+}
+
+// section(t) -> {w, h, hb, dy}: half width, half height above and below the spine, and a vertical offset.
+// color(t, a) -> THREE.Color; a = 0 on the top (dorsal) line, PI underneath.
+function sweep(points, { segs = 64, ring = 18, section, color, up = UP, uvScale = 1, around = 4, ref = null }) {
+  const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
+  const P = curve.getSpacedPoints(segs);
+  const { N, B } = frames(P, up, ref);
+  const length = curve.getLength();
+  const pos = [], cols = [], uv = [], idx = [];
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs, s = section(t);
+    for (let j = 0; j <= ring; j++) {
+      const a = (j / ring) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      const p = P[i].clone().addScaledVector(N[i], ca * (ca >= 0 ? s.h : s.hb) + (s.dy || 0)).addScaledVector(B[i], sa * s.w);
+      pos.push(p.x, p.y, p.z);
+      const c = color(t, a);
+      cols.push(c.r, c.g, c.b);
+      uv.push((j / ring) * around, t * length * uvScale);
+    }
+  }
+  for (let i = 0; i < segs; i++) {
+    for (let j = 0; j < ring; j++) {
+      const a = i * (ring + 1) + j, b = a + ring + 1;
+      idx.push(a, a + 1, b, b, a + 1, b + 1);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const nrm = g.attributes.normal;  // weld the seam's normals so the top line shows no crease
+  for (let i = 0; i <= segs; i++) {
+    const a = i * (ring + 1), b = a + ring;
+    const n = V(nrm.getX(a) + nrm.getX(b), nrm.getY(a) + nrm.getY(b), nrm.getZ(a) + nrm.getZ(b)).normalize();
+    nrm.setXYZ(a, n.x, n.y, n.z); nrm.setXYZ(b, n.x, n.y, n.z);
+  }
+  g.userData = { curve, P, N, B, length };
+  return g;
+}
+
+const circle = (r0, r1, p = 1) => (t) => { const r = r0 + (r1 - r0) * Math.pow(t, p); return { w: r, h: r, hb: r }; };
+const flat = (c) => () => c;
+
+// ---- materials ------------------------------------------------------------------------------
+const scales = scaleTexture();
+const M = {
+  skin: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.58, metalness: 0.08, bumpMap: scales, bumpScale: 0.32 }),
+  horn: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38, metalness: 0.12 }),
+  membrane: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide }),
+  tooth: new THREE.MeshStandardMaterial({ color: 0xd9d1bf, roughness: 0.3 }),
+  glow: new THREE.MeshBasicMaterial({ color: 0x9dff6a }),
+  mouth: new THREE.MeshBasicMaterial({ color: 0x3ec21e }),
+  rock: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0.0, flatShading: true }),
+};
+const C = {
+  skin: col("#8b6f7d"), skinDark: col("#5b4552"), plate: col("#1e2922"), plateEdge: col("#62806a"),
+  horn: col("#2a2226"), hornTip: col("#120e10"), mem: col("#4a4a38"), memLight: col("#76724f"), memBone: col("#4c3a44"),
+  rock: col("#5d5650"), rockTop: col("#7d746a"),
+};
+
+const dragon = new THREE.Group();
+dragon.name = "storm_dragon";
+let triangles = 0, parts = 0;
+function add(geo, mat, parent = dragon, name = "") {
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true; mesh.name = name;
+  parent.add(mesh);
+  triangles += (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+  parts += 1;
+  return mesh;
+}
+const keratin = (t) => C.horn.clone().lerp(C.hornTip, Math.pow(t, 1.5));
+
+function taper(points, r0, r1, mat, parent, opts = {}) {  // horns, claws, spikes, bones
+  return add(sweep(points, { segs: opts.segs || 14, ring: opts.ring || 8, section: circle(r0, r1, opts.p || 1),
+    color: opts.color || keratin }), mat, parent);
+}
+function hook(base, dir, len, r, curl, parent, mat = M.horn) {  // a curved spike or claw: grows along dir, curls toward curl
+  const d = dir.clone().normalize(), c = curl.clone().normalize();
+  const pts = [0, 0.35, 0.7, 1].map((k) => base.clone().addScaledVector(d, len * k).addScaledVector(c, len * 0.45 * k * k));
+  return taper(pts, r, 0.002, mat, parent, { p: 1.1 });
+}
+
+// ---- body: tail tip -> hips -> chest -> neck -> head base -----------------------------------
+const SPINE = [
+  V(1.05, 0.15, 1.75), V(1.75, 0.05, 0.55), V(1.45, 0.2, -0.95), V(0.6, 0.75, -1.75), V(0.05, 1.7, -1.55),
+  V(0, 2.65, -0.75), V(0, 3.55, -0.2), V(0, 4.35, 0.25), V(0, 4.95, 0.5), V(0, 5.55, 0.75),
+  V(0, 6.25, 0.95), V(0, 6.85, 1.45), V(0, 7.15, 2.05),
+];
+const BODY_KEYS = [
+  [0.0, { w: 0.02, h: 0.02, hb: 0.02 }], [0.1, { w: 0.07, h: 0.07, hb: 0.07 }], [0.26, { w: 0.15, h: 0.15, hb: 0.16 }],
+  [0.39, { w: 0.3, h: 0.3, hb: 0.33 }], [0.5, { w: 0.5, h: 0.48, hb: 0.55 }], [0.6, { w: 0.55, h: 0.52, hb: 0.66 }],
+  [0.69, { w: 0.66, h: 0.55, hb: 0.82 }], [0.76, { w: 0.56, h: 0.46, hb: 0.6 }], [0.83, { w: 0.36, h: 0.31, hb: 0.4 }],
+  [0.92, { w: 0.27, h: 0.24, hb: 0.3 }], [1.0, { w: 0.25, h: 0.24, hb: 0.25 }],
+];
+const PLATES = 64;  // belly plates from tail tip to throat
+const bodyGeo = sweep(SPINE, {
+  segs: 220, ring: 32, uvScale: 2.6, around: 9,
+  // Dorsal = up where the spine runs level (tail, head), backward where it rises (the rearing torso).
+  ref: (T) => { const v = Math.abs(T.y); return V(0, 1 - v, -v); },
+  section: (t) => {  // each belly plate swells out a little, so the underside reads as ridged armour
+    const s = keyed(BODY_KEYS, t), row = (t * PLATES) % 1;
+    return { ...s, hb: s.hb * (1 + 0.07 * Math.sin(Math.PI * row) * smooth(0.12, 0.25, t)) };
+  },
+  color: (t, a) => {
+    const belly = smooth(0.2, 0.62, -Math.cos(a));
+    const plateRow = (t * PLATES) % 1;  // belly plates: dark segments with a pale leading edge
+    const plate = C.plate.clone().lerp(C.plateEdge, plateRow < 0.12 ? 0.85 : 0.22 * (1 - plateRow));
+    const ridge = smooth(0.75, 1.0, Math.cos(a));
+    const skin = C.skin.clone().lerp(C.skinDark, 0.55 * ridge + 0.35 * smooth(0.4, 0.0, t));
+    return skin.lerp(plate, belly * smooth(0.06, 0.2, t));
+  },
+});
+add(bodyGeo, M.skin, dragon, "body");
+const BODY = bodyGeo.userData;
+const at = (t) => {  // a frame on the spine
+  const i = Math.round(t * (BODY.P.length - 1));
+  return { p: BODY.P[i], n: BODY.N[i], b: BODY.B[i], t: BODY.P[Math.min(i + 1, BODY.P.length - 1)].clone().sub(BODY.P[Math.max(i - 1, 0)]).normalize(),
+    s: keyed(BODY_KEYS, t) };
+};
+
+// Dorsal spikes from the neck to the tail tip; the biggest over the shoulders.
+for (let t = 0.08; t < 0.97; t += 0.023) {
+  const f = at(t);
+  const size = keyed([[0.08, 0.1], [0.4, 0.3], [0.62, 0.42], [0.78, 0.36], [0.95, 0.16]], t);
+  const base = f.p.clone().addScaledVector(f.n, f.s.h * 0.86);
+  hook(base, f.n.clone().addScaledVector(f.t, -0.85), size, size * 0.24, f.t.clone().multiplyScalar(-1), dragon);
+}
+// The tail ends in a hooked barb.
+{
+  const f = at(0.0), g = at(0.03);
+  const dir = f.p.clone().sub(g.p).normalize();
+  hook(f.p.clone(), dir, 0.55, 0.07, f.n.clone().multiplyScalar(-1), dragon);
+  hook(g.p.clone().addScaledVector(g.b, 0.05), dir.clone().addScaledVector(g.b, 0.9), 0.3, 0.04, dir, dragon);
+  hook(g.p.clone().addScaledVector(g.b, -0.05), dir.clone().addScaledVector(g.b, -0.9), 0.3, 0.04, dir, dragon);
+}
+
+// ---- head -----------------------------------------------------------------------------------
+const head = new THREE.Group();
+head.name = "head";
+const neckEnd = at(1.0);
+head.position.copy(neckEnd.p).addScaledVector(neckEnd.t, -0.12);
+head.lookAt(head.position.clone().add(neckEnd.t.clone().add(V(0, -0.55, 0.35)).normalize()));
+head.scale.setScalar(1.25);
+dragon.add(head);
+
+const SKULL = [[0, { w: 0.27, h: 0.31, hb: 0.18 }], [0.16, { w: 0.32, h: 0.36, hb: 0.19 }], [0.34, { w: 0.26, h: 0.27, hb: 0.15 }],
+  [0.62, { w: 0.19, h: 0.2, hb: 0.12 }], [0.86, { w: 0.15, h: 0.16, hb: 0.1 }], [0.96, { w: 0.1, h: 0.11, hb: 0.07 }],
+  [1, { w: 0.03, h: 0.04, hb: 0.03 }]];
+const upper = new THREE.Group(); upper.rotation.x = -0.16; head.add(upper);
+const skullGeo = sweep([V(0, 0, -0.1), V(0, 0.02, 0.4), V(0, -0.01, 0.85), V(0, -0.06, 1.3)], {
+  segs: 48, ring: 22, uvScale: 2.2, section: (t) => keyed(SKULL, t),
+  color: (t, a) => C.skin.clone().lerp(C.skinDark, 0.5 * smooth(0.6, 1.0, Math.cos(a)) + 0.3 * smooth(0.5, 1, t)),
+});
+add(skullGeo, M.skin, upper, "skull");
+const JAW = [[0, { w: 0.2, h: 0.07, hb: 0.12 }], [0.4, { w: 0.17, h: 0.06, hb: 0.1 }], [0.8, { w: 0.11, h: 0.05, hb: 0.06 }],
+  [1, { w: 0.04, h: 0.03, hb: 0.03 }]];
+const jaw = new THREE.Group(); jaw.position.set(0, -0.13, 0.0); jaw.rotation.x = 0.42; head.add(jaw);
+const jawGeo = sweep([V(0, 0, -0.05), V(0, -0.03, 0.45), V(0, -0.05, 0.85), V(0, -0.03, 1.12)], {
+  segs: 36, ring: 18, uvScale: 2.2, section: (t) => keyed(JAW, t),
+  color: (t, a) => C.skin.clone().lerp(C.plate, smooth(0.3, 0.9, -Math.cos(a)) * 0.8),
+});
+add(jawGeo, M.skin, jaw, "jaw");
+// The mouth glows from inside: a throat cone, a light, and breath sprites (below).
+const throat = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.95, 16, 1, true), M.mouth);
+throat.rotation.x = Math.PI / 2 + 0.2; throat.position.set(0, -0.13, 0.42); head.add(throat);
+const mouthLight = new THREE.PointLight(0x7dff4a, 3, 2.4, 2); mouthLight.position.set(0, -0.12, 1.25); head.add(mouthLight);
+// Teeth along both jaws.
+for (const side of [-1, 1]) {
+  for (let k = 0; k < 7; k++) {
+    const z = 0.35 + k * 0.13, s = keyed(SKULL, (z + 0.1) / 1.4);
+    const t1 = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.11 - k * 0.006, 6), M.tooth);
+    t1.position.set(side * s.w * 0.82, -s.hb * 0.92 - 0.04, z); t1.rotation.x = Math.PI; upper.add(t1);
+    const sj = keyed(JAW, z / 1.1);
+    const t2 = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.09 - k * 0.005, 6), M.tooth);
+    t2.position.set(side * sj.w * 0.8, sj.h + 0.035, z - 0.05); jaw.add(t2);
+  }
+  // Eyes: glowing slits under a heavy brow.
+  const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 10), M.glow);
+  eye.scale.set(0.45, 0.32, 1.25); eye.position.set(side * 0.262, 0.11, 0.33); eye.rotation.y = side * 0.35; upper.add(eye);
+  hook(V(side * 0.2, 0.2, 0.45), V(side * 0.35, 0.25, -1), 0.28, 0.05, V(0, 1, -0.5), upper);  // brow spike
+  // Horns: three pairs swept back, the top pair long and curving up.
+  hook(V(side * 0.15, 0.26, 0.05), V(side * 0.35, 0.45, -1), 1.6, 0.1, V(side * 0.1, 0.6, 0.2), upper);
+  hook(V(side * 0.25, 0.14, 0.08), V(side * 0.6, 0.15, -1), 1.15, 0.075, V(side * 0.1, 0.5, 0), upper);
+  hook(V(side * 0.24, -0.03, 0.02), V(side * 0.7, -0.1, -1), 0.75, 0.055, V(0, 0.4, 0), upper);
+  // Cheek and jaw spikes: a ragged frill.
+  for (let k = 0; k < 4; k++) {
+    hook(V(side * 0.18, -0.04 - k * 0.03, 0.05 - k * 0.04), V(side * 0.5, -0.3 - k * 0.15, -1), 0.4 - k * 0.06, 0.035, V(0, 0.2, 0), jaw);
+  }
+}
+for (let k = 0; k < 5; k++) {  // a crest down the middle of the skull
+  hook(V(0, 0.31 - k * 0.02, 0.3 - k * 0.22), V(0, 0.8, -1), 0.32 - k * 0.03, 0.045, V(0, 0, -1), upper);
+}
+
+// ---- limbs ----------------------------------------------------------------------------------
+function limb(points, r0, r1, parent = dragon, flatten = 1) {
+  add(sweep(points, { segs: 28, ring: 14, uvScale: 3.5, around: 3,
+    section: (t) => { const r = r0 + (r1 - r0) * t; return { w: r * flatten, h: r, hb: r }; },
+    color: (t, a) => C.skin.clone().lerp(C.skinDark, 0.35 * smooth(0.4, 1, Math.cos(a))) }), M.skin, parent);
+}
+function joint(p, r) { add(new THREE.SphereGeometry(r, 16, 12), new THREE.MeshStandardMaterial({ color: C.skin, roughness: 0.6, bumpMap: scales, bumpScale: 1 })).position.copy(p); }
+function hand(wrist, forward, down, side, spread, size) {
+  for (let k = 0; k < 4; k++) {
+    const off = (k - 1.5) * spread;
+    const base = wrist.clone().addScaledVector(V(side, 0, 0), off).addScaledVector(forward, 0.05);
+    const knuckle = base.clone().addScaledVector(forward, size * 0.45).addScaledVector(V(side * off, 0, 0), 0.6);
+    limb([base, knuckle], size * 0.11, size * 0.08);
+    hook(knuckle, forward.clone().addScaledVector(down, 0.6), size * 0.42, size * 0.07, down, dragon);
+  }
+}
+for (const s of [-1, 1]) {
+  // Forelimbs, raised and clawing; the right one (s = -1) a little lower.
+  const shoulder = V(s * 0.45, 4.7, 0.42), elbow = V(s * 0.85, 4.15, 0.95);
+  const wrist = s > 0 ? V(s * 0.78, 4.75, 1.62) : V(s * 0.72, 4.4, 1.66);
+  limb([shoulder, shoulder.clone().lerp(elbow, 0.5).add(V(s * 0.08, 0, 0)), elbow], 0.25, 0.15, dragon, 0.8);
+  limb([elbow, elbow.clone().lerp(wrist, 0.5), wrist], 0.15, 0.1);
+  joint(elbow, 0.155);
+  hand(wrist, V(0, -0.2, 1).normalize(), V(0, -1, 0.15).normalize(), s, 0.06, 0.62);
+  hook(elbow.clone().add(V(s * 0.08, -0.05, -0.1)), V(s * 0.3, -0.2, -1), 0.3, 0.05, V(0, 1, 0), dragon);  // elbow spur
+  // Hind legs gripping the rock.
+  const hip = V(s * 0.5, 2.75, -0.55), knee = V(s * 0.88, 2.55, 0.3), ankle = V(s * 0.74, 2.2, -0.5);
+  limb([hip, hip.clone().lerp(knee, 0.5).add(V(s * 0.1, 0.1, 0)), knee], 0.4, 0.2, dragon, 0.72);
+  limb([knee, knee.clone().lerp(ankle, 0.5).add(V(s * 0.05, -0.12, 0.05)), ankle], 0.2, 0.12);
+  joint(knee, 0.17);
+  const toes = V(s * 0.66, 2.0, -0.08);
+  limb([ankle, ankle.clone().lerp(toes, 0.5).add(V(0, -0.02, 0)), toes], 0.13, 0.09);
+  hand(toes, V(0, -0.35, 1).normalize(), V(0, -1, 0.1).normalize(), s, 0.075, 0.6);
+}
+
+// ---- wings ----------------------------------------------------------------------------------
+function panel(A, B, side, opts) {  // a membrane between two edges that start at the same point (the wrist)
+  const { scallop = 0.18, sag = 0.3, nS = 22, nU = 14 } = opts;
+  const start = A[0];
+  const pos = [], cols = [], idx = [];
+  const billow = V(0, -0.15, -1).normalize();
+  for (let i = 0; i <= nS; i++) {
+    const s = i / nS;
+    for (let j = 0; j <= nU; j++) {
+      const u = j / nU;
+      const p = A[i].clone().lerp(B[i], u);
+      const pull = scallop * Math.sin(Math.PI * u) * Math.pow(s, 3);
+      p.sub(start).multiplyScalar(1 - pull).add(start);
+      p.addScaledVector(billow, sag * Math.sin(Math.PI * u) * Math.sin(Math.PI * Math.min(1, s * 0.9)));
+      pos.push(p.x, p.y, p.z);
+      const mid = Math.sin(Math.PI * u) * smooth(0.05, 0.6, s);
+      const vein = Math.abs(((u * 3) % 1) - 0.5) < 0.04 ? 0.35 : 0;
+      const c = C.memBone.clone().lerp(C.mem, smooth(0, 0.25, Math.min(u, 1 - u) * 2)).lerp(C.memLight, mid * 0.75);
+      c.lerp(C.memBone, vein + 0.3 * smooth(0.85, 1, s));
+      cols.push(c.r, c.g, c.b);
+    }
+  }
+  for (let i = 0; i < nS; i++) for (let j = 0; j < nU; j++) {
+    const a = i * (nU + 1) + j, b = a + nU + 1;
+    if (side > 0) idx.push(a, b, a + 1, b, b + 1, a + 1); else idx.push(a, a + 1, b, b, a + 1, b + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+const sample = (pts, n) => new THREE.CatmullRomCurve3(pts, false, "centripetal").getSpacedPoints(n);
+const wings = [];
+for (const s of [-1, 1]) {
+  const wing = new THREE.Group(); wing.name = s > 0 ? "wing_left" : "wing_right";
+  const root = V(s * 0.3, 5.05, 0.0);
+  wing.position.copy(root); dragon.add(wing); wings.push({ wing, s });
+  const L = (x, y, z) => V(s * x, y, z).sub(root.clone().setX(root.x));  // world -> wing-local
+  const shoulder = L(0.3, 5.05, 0.0), elbow = L(1.55, 6.35, -0.75), wrist = L(2.75, 7.95, -1.35);
+  const tips = [L(3.55, 10.6, -1.3), L(5.1, 9.35, -2.3), L(5.85, 7.25, -2.75), L(5.1, 5.0, -2.6)];
+  const hipAttach = L(0.5, 3.15, -0.85);
+  const fingers = tips.map((tip, k) => [wrist, wrist.clone().lerp(tip, 0.5).add(V(0, 0, -0.25 - k * 0.05)), tip]);
+  const n = 22;
+  const edges = fingers.map((f) => sample(f, n));
+  edges.push(sample([wrist, elbow, shoulder, L(0.42, 4.3, -0.4), hipAttach], n));
+  for (let k = 0; k < edges.length - 1; k++) {
+    add(panel(edges[k], edges[k + 1], s, { scallop: k === edges.length - 2 ? 0.1 : 0.2, sag: 0.32 }), M.membrane, wing, "membrane");
+  }
+  const bone = (pts, r0, r1) => add(sweep(pts, { segs: 24, ring: 10, uvScale: 3, section: circle(r0, r1),
+    color: (t, a) => C.skin.clone().lerp(C.skinDark, 0.4 + 0.3 * t) }), M.skin, wing);
+  bone([shoulder, shoulder.clone().lerp(elbow, 0.5).add(V(0, 0.1, 0)), elbow], 0.15, 0.11);
+  bone([elbow, elbow.clone().lerp(wrist, 0.5).add(V(0, 0.08, 0.05)), wrist], 0.11, 0.08);
+  fingers.forEach((f, k) => bone(f, 0.07 - k * 0.004, 0.018));
+  const thumbDir = V(s * 0.2, 0.6, 1);
+  hook(wrist.clone(), thumbDir, 0.45, 0.06, V(0, -1, 0.2), wing);
+  hook(elbow.clone().add(V(0, 0.05, -0.05)), V(s * 0.1, -0.2, -1), 0.3, 0.05, V(0, 1, 0), wing);
+}
+
+// ---- the rock spire -------------------------------------------------------------------------
+const rockGroup = new THREE.Group(); rockGroup.name = "rock";
+{
+  const g = new THREE.CylinderGeometry(0.85, 1.7, 7.0, 22, 18);
+  g.translate(0, -1.55, -0.55);
+  const p = g.attributes.position, cs = [];
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i) + 0.55;
+    const ang = Math.atan2(z, x), r = Math.hypot(x, z);
+    const n = 1 + 0.16 * Math.sin(ang * 5 + y * 1.3) + 0.09 * Math.sin(ang * 11 - y * 2.7) + 0.05 * Math.sin(y * 7 + ang * 3);
+    let yy = y;
+    if (y > 1.9) yy = 1.9 + 0.12 * Math.sin(ang * 4) + 0.06 * Math.sin(ang * 9);  // a broken top
+    p.setXYZ(i, Math.cos(ang) * r * n, yy, Math.sin(ang) * r * n - 0.55);
+    const c = C.rock.clone().lerp(C.rockTop, smooth(0.6, 2.0, yy)).multiplyScalar(0.85 + 0.25 * rand());
+    cs.push(c.r, c.g, c.b);
+  }
+  g.setAttribute("color", new THREE.Float32BufferAttribute(cs, 3));
+  g.computeVertexNormals();
+  const spire = add(g, M.rock, rockGroup, "spire");
+  spire.castShadow = false;
+  for (let k = 0; k < 9; k++) {  // stacked slabs: the strata of a crag
+    const w = 0.9 + rand() * 0.9, h = 0.28 + rand() * 0.3, d = 0.8 + rand() * 0.8;
+    const g2 = new THREE.BoxGeometry(w, h, d, 2, 1, 2);
+    const pb = g2.attributes.position;
+    for (let i = 0; i < pb.count; i++) pb.setXYZ(i, pb.getX(i) * (0.85 + rand() * 0.3), pb.getY(i) * (0.8 + rand() * 0.4), pb.getZ(i) * (0.85 + rand() * 0.3));
+    g2.computeVertexNormals();
+    const cc = []; for (let i = 0; i < pb.count; i++) { const c = C.rock.clone().lerp(C.rockTop, rand() * 0.5).multiplyScalar(0.8 + rand() * 0.25); cc.push(c.r, c.g, c.b); }
+    g2.setAttribute("color", new THREE.Float32BufferAttribute(cc, 3));
+    const m = add(g2, M.rock, rockGroup, "slab");
+    const a = (k / 9) * Math.PI * 2 + rand() * 0.5, y = 1.55 - k * 0.42;
+    m.position.set(Math.cos(a) * (0.95 + k * 0.08), y, Math.sin(a) * (0.95 + k * 0.08) - 0.55);
+    m.rotation.set((rand() - 0.5) * 0.25, a + rand(), (rand() - 0.5) * 0.25);
+  }
+}
+dragon.add(rockGroup);
+
+// ---- scene ----------------------------------------------------------------------------------
+const canvas = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = skyTexture();
+scene.fog = new THREE.FogExp2(0x2c3a44, 0.022);
+scene.add(dragon);
+dragon.rotation.y = 0.0;
+
+const hemi = new THREE.HemisphereLight(0x9fb4c6, 0x3a3230, 1.1); scene.add(hemi);
+const key = new THREE.DirectionalLight(0xdfe8ff, 2.2); key.position.set(6, 12, 8); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -8, right: 8, top: 12, bottom: -4, near: 1, far: 40 });
+key.shadow.bias = -0.0004; scene.add(key);
+const rim = new THREE.DirectionalLight(0x8fb0d8, 1.6); rim.position.set(-8, 6, -10); scene.add(rim);
+const flash = new THREE.DirectionalLight(0xe6f2ff, 0); flash.position.set(-12, 18, -14); scene.add(flash);
+
+// Distant spires in the fog.
+for (let k = 0; k < 9; k++) {
+  const h = 6 + rand() * 12, g = new THREE.ConeGeometry(1.5 + rand() * 2.5, h, 7);
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x3b4248, roughness: 1, flatShading: true }));
+  const a = rand() * Math.PI * 2, d = 26 + rand() * 30;
+  m.position.set(Math.cos(a) * d, h / 2 - 6, Math.sin(a) * d); scene.add(m);
+}
+
+// Breath: green embers drifting out of the mouth.
+const glowTex = glowTexture();
+const breath = [];
+for (let k = 0; k < 26; k++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xa8ff7a, blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false }));
+  sp.userData.phase = k / 26; scene.add(sp); breath.push(sp);
+}
+const mouthAnchor = new THREE.Object3D(); mouthAnchor.position.set(0, -0.2, 1.3); head.add(mouthAnchor);
+const mouthAim = new THREE.Object3D(); mouthAim.position.set(0, -0.55, 2.4); head.add(mouthAim);
+
+// Rain.
+const RAIN = 1400, rainPos = new Float32Array(RAIN * 6);
+for (let i = 0; i < RAIN; i++) {
+  const x = (rand() - 0.5) * 40, y = rand() * 30 - 6, z = (rand() - 0.5) * 40;
+  rainPos.set([x, y, z, x + 0.12, y - 0.7, z + 0.05], i * 6);
+}
+const rainGeo = new THREE.BufferGeometry(); rainGeo.setAttribute("position", new THREE.BufferAttribute(rainPos, 3));
+const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({ color: 0x9fb2c2, transparent: true, opacity: 0.28 }));
+scene.add(rain);
+
+// Lightning bolts in the distance.
+function boltGeometry() {
+  const pts = [];
+  let p = V((rand() - 0.5) * 50, 28, -30 - rand() * 15);
+  for (let k = 0; k < 22; k++) { pts.push(p.clone()); p = p.clone().add(V((rand() - 0.5) * 2.4, -1.4 - rand(), (rand() - 0.5) * 0.6)); }
+  return new THREE.BufferGeometry().setFromPoints(pts);
+}
+const bolt = new THREE.Line(boltGeometry(), new THREE.LineBasicMaterial({ color: 0xe9f6ff, transparent: true, opacity: 0, fog: false }));
+scene.add(bolt);
+
+// ---- camera and controls --------------------------------------------------------------------
+const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 400);
+const HOME = { pos: V(8.5, 6.0, 16.5), target: V(0.0, 4.9, -0.6) };
+camera.position.copy(HOME.pos);
+const controls = new OrbitControls(camera, canvas);
+controls.target.copy(HOME.target); controls.enableDamping = true; controls.enablePan = false;
+controls.minDistance = 4; controls.maxDistance = 40; controls.maxPolarAngle = Math.PI * 0.62;
+controls.autoRotateSpeed = 0.45;
+controls.autoRotate = !still;
+controls.update();
+controls.addEventListener("start", () => setTurn(false));
+
+const turnBtn = document.getElementById("turn"), stormBtn = document.getElementById("storm");
+function setTurn(on) { controls.autoRotate = on; turnBtn.setAttribute("aria-pressed", String(on)); }
+let storm = !still;
+function setStorm(on) { storm = on; rain.visible = on; stormBtn.setAttribute("aria-pressed", String(on)); }
+setTurn(!still); setStorm(storm);
+turnBtn.addEventListener("click", () => setTurn(!controls.autoRotate));
+stormBtn.addEventListener("click", () => setStorm(!storm));
+document.getElementById("reset").addEventListener("click", () => {
+  camera.position.copy(HOME.pos); controls.target.copy(HOME.target); controls.update();
+});
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.fov = w / h < 0.8 ? 50 : 36;  // phones in portrait: a wider lens keeps the wings in frame
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
+
+document.getElementById("stats").textContent =
+  `${Math.round(triangles).toLocaleString("en")} triangles · ${parts} parts · no sculpting, no textures but the scales`;
+
+// ---- animation ------------------------------------------------------------------------------
+const clock = new THREE.Clock();
+let nextBolt = 2.5, boltAge = 99;
+const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3();
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  if (!still) {
+    for (const { wing, s } of wings) wing.rotation.z = s * (0.05 * Math.sin(time * 0.8) - 0.02);
+    head.rotation.z = 0.04 * Math.sin(time * 0.6);
+    jaw.rotation.x = 0.42 + 0.04 * Math.sin(time * 1.7);
+  }
+  mouthLight.intensity = 3 + (still ? 0 : 0.9 * Math.sin(time * 6.3) + 0.5 * Math.sin(time * 9.1));
+  mouthAnchor.getWorldPosition(tmpA); mouthAim.getWorldPosition(tmpB);
+  for (const sp of breath) {
+    const k = still ? sp.userData.phase * 0.6 : (sp.userData.phase + time * 0.35) % 1;
+    sp.position.copy(tmpA).lerp(tmpB, k).add(V(Math.sin(k * 9 + sp.userData.phase * 20) * 0.12 * k, k * 0.25, 0));
+    const size = 0.12 + k * 0.6;
+    sp.scale.set(size, size, size);
+    sp.material.opacity = (1 - k) * (1 - k) * 0.55;
+  }
+  if (storm && !still) {
+    const p = rain.geometry.attributes.position;
+    for (let i = 0; i < RAIN; i++) {
+      let y = p.getY(i * 2) - dt * 22;
+      if (y < -6) y += 30;
+      p.setY(i * 2, y); p.setY(i * 2 + 1, y - 0.7);
+      p.setX(i * 2 + 1, p.getX(i * 2) + 0.12);
+    }
+    p.needsUpdate = true;
+    nextBolt -= dt; boltAge += dt;
+    if (nextBolt <= 0) { bolt.geometry.dispose(); bolt.geometry = boltGeometry(); boltAge = 0; nextBolt = 4 + rand() * 6; }
+  }
+  const lit = boltAge < 0.09 || (boltAge > 0.16 && boltAge < 0.26) ? 1 : 0;
+  bolt.material.opacity = lit; flash.intensity = lit * 4.5; hemi.intensity = 1.1 + lit * 0.8;
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(() => { document.getElementById("loading").hidden = true; frame(); window.__dragonReady = true; });
+window.__dragon = { scene, dragon, camera, controls, renderer, HOME };
+window.__exportGLB = async () => {  // used to write the .glb file; not part of the page's controls
+  const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
+  const result = await new GLTFExporter().parseAsync(dragon, { binary: true });
+  const bytes = new Uint8Array(result);
+  let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+</script>
