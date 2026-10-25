@@ -1,24 +1,29 @@
 # Tools and workflow
 
-1. `start_session(task)`: returns the goal, the acceptance criteria, the conventions and the quiz.
-2. `answer_quiz(answers)`: editing unlocks when every answer is right.
-3. `observe(frames, views)`: views are `report`, `timeline`, `sheet`, `filmstrip` and `footprints`.
-   Trust the numbers in `report` and `timeline` over your reading of the images.
-4. Edit. Every edit takes `expect=[...]`:
-   - `set_root(frame, forward, left, height, heading)`: pelvis position (track coordinates) and facing
-   - `set_pose(frame, angles)`: anatomical angles, e.g. {"left_shoulder.flexion": 15}
-   - `plant_foot(side, start, end, forward, left, facing)`: pin a foot; `facing` sets where its toes point
-     (default: the body heading at the plant's first frame). The tool solves the leg.
-   - `swing_foot(side, start, end, apex)`: arc a foot between two plants
-   - `batch(edits)`: several edits at once under one set of predictions; one `undo()` reverts them all
-   - Every edit takes `dry_run=true`: the tool evaluates it, grades your predictions and shows what would
-     change, but applies nothing. Use it to try ideas safely.
+1. `start_session(task)`: returns the goal, the acceptance criteria and the conventions. With the protocol on,
+   it also returns a short quiz.
+2. `answer_quiz(answers)`: only with the protocol on (the default). Editing unlocks when every answer is right.
+   With the protocol off there is no quiz: start editing straight away.
+3. `observe(views)`: look at the result.
+   - Vessels: `report` (measurements as text) and `sheet` (a side view beside the profile plot).
+   - Figures: `report`, `timeline`, `sheet`, `filmstrip` and `footprints`, at chosen `frames`.
+   Trust the numbers over your reading of the images, but do look: the criteria do not judge everything.
+4. Edit. With the protocol on, every edit takes `expect=[...]`, predictions the tool checks after the edit.
+   - Vessels: `shape_profile(points, wall)` sets the side profile, [height, radius] pairs from the base up;
+     `paint_band(start, end, color)` paints heights start to end, both included. See guide('vessels').
+   - Figures: `set_root(frame, forward, left, height, heading)` places the pelvis; `set_pose(frame, angles)`
+     sets anatomical angles, e.g. {"left_shoulder.flexion": 15}; `plant_foot(side, start, end, forward, left,
+     facing)` pins a foot and the tool solves the leg; `swing_foot(side, start, end, apex)` arcs a foot
+     between two plants. See guide('walking').
+   - `batch(edits)`: several edits at once under one set of predictions; one `undo()` reverts them all.
+   - Every edit takes `dry_run=true`: the tool evaluates it and shows what would change, but applies nothing.
    - Every edit result ends with `CHANGED:`, a numeric before/after diff. Trust it over images.
 5. `calc(expr)`: exact math on the scene (see guide('calculator')). Save numbers and use them as `$name`.
 6. `check()`: lists every failed check with a hint, and the acceptance status.
-7. `undo()` or `accept_discrepancy(reason)` after a failed prediction.
-8. `finish(claims)`: at least 2 claims about the final result, at least one precise.
-   The tool certifies only when every check, criterion and claim passes.
-   If it says NOT CERTIFIED, the task is not done: fix it and call finish again.
+7. `undo()`, or with the protocol on `accept_discrepancy(reason)`, after a failed prediction.
+8. `finish(claims)`: with the protocol on, claims are a LIST of short statements in the prediction syntax,
+   e.g. ["vessel.foot_diameter ~= 0.10 ± 0.01", "color(0.05) is gold"]: at least 2, at least one precise.
+   The tool certifies only when every check, criterion and claim passes; NOT CERTIFIED means the task is not
+   done. With the protocol off, `finish` closes the session and reports the acceptance result.
 9. `export()`: writes a .glb file that Blender opens.
-10. `guide(topic)`: conventions, walking, predictions, calculator, tools.
+10. `guide(topic)`: conventions, walking, vessels, predictions, calculator, tools.

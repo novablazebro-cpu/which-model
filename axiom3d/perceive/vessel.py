@@ -42,7 +42,8 @@ def describe_vessel(spec: VesselSpec | None) -> str:
         "VESSEL (Z up, metres; diameters are 2 × radius):",
         f"  height {m.height:.3f} · max diameter {m.max_diameter:.3f} at h {m.shoulder_height:.3f} "
         f"(shoulder ratio {m.shoulder_ratio:.3f})",
-        f"  mouth {m.mouth_diameter:.3f} · neck {m.neck_diameter:.3f} · waist {m.waist_diameter:.3f} · "
+        f"  mouth {m.mouth_diameter:.3f} · neck {m.neck_diameter:.3f} · waist {m.waist_diameter:.3f} at h "
+        f"{m.waist_height:.3f} · "
         f"foot {m.foot_diameter:.3f}",
         f"  max diameter/height {m.max_diameter / m.height:.3f} · mouth/height {m.mouth_diameter / m.height:.3f} · "
         f"foot/height {m.foot_diameter / m.height:.3f}",
@@ -54,7 +55,7 @@ def describe_vessel(spec: VesselSpec | None) -> str:
         r = radius_at(spec, h)
         lines.append(f"  h {h:.3f}  r {r:.3f}  d {2 * r:.3f}")
     lines.append(f"  (widest: r {m.max_diameter / 2:.3f} at h {m.shoulder_height:.3f}; narrowest above it: "
-                 f"d {m.neck_diameter:.3f}; narrowest below it: d {m.waist_diameter:.3f})")
+                 f"d {m.neck_diameter:.3f}; narrowest below it: d {m.waist_diameter:.3f} at h {m.waist_height:.3f})")
     lines.append(f"COLOUR ZONES (bottom to top): {_zones_text(spec)}")
     return "\n".join(lines)
 

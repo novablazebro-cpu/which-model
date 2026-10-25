@@ -107,6 +107,10 @@ MEIPING = (
     ("foot_flare", "the foot flares: foot diameter >= waist diameter + 0.005 m",
      lambda m: (m.foot_diameter - m.waist_diameter >= 0.005,
                 f"foot {m.foot_diameter:.3f} m vs waist {m.waist_diameter:.3f} m")),
+    ("waist_low", "the waist sits just above the foot: the narrowest point below the shoulder is in the lowest 15% "
+     "of the height (higher up, the body pinches into an hourglass)",
+     lambda m: (m.waist_height <= 0.15 * m.height,
+                f"waist at h {m.waist_height:.3f} m = {m.waist_height / m.height:.3f} x height")),
     ("red_body", "red at half height",
      lambda m: (color_name(m.color_at(m.height / 2)) == "red", f"colour at half height: {_named(m, m.height / 2)}")),
     ("blue_foot", "blue somewhere in the lowest 20% (the wave band)", lambda m: _blue_low(m)),

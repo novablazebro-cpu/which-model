@@ -49,7 +49,9 @@ VESSEL_EXPECT_HELP = (
 )
 VESSEL_WORKFLOW = (
     "WORKFLOW: 1) answer_quiz  2) shape_profile(points=[[height, radius], ...]) with expect=[predictions]  "
-    "3) paint_band(start, end, color) with expect  4) observe / check  5) finish(claims).\n"
+    "3) paint_band(start, end, color) with expect  4) observe(views=['sheet']) and check: look at the vase, the "
+    "criteria do not judge everything  5) finish(claims=[\"vessel.foot_diameter ~= 0.10 ± 0.01\", "
+    "\"color(0.05) is gold\"]): a LIST of short claims, not prose.\n"
     "Tip: points are [height, RADIUS] from the base (h = 0) up; the tool smooths them into a curve and measures "
     "it. calc('radius_at(0.2)') reads the smoothed radius. guide('vessels') explains vessel anatomy."
 )
@@ -57,7 +59,8 @@ VESSEL_CONVENTIONS = (
     "Frame: right-handed, Z up, metres. The vessel stands on z = 0 with its axis on the Z axis.\n"
     "Profile: [height, radius] points from the base (height 0) to the mouth; heights strictly increase.\n"
     "A radius is half a diameter. Every DIAMETER in the acceptance criteria is 2 x radius.\n"
-    "Bands: paint_band(start, end, color) paints heights start..end; a later band covers earlier ones."
+    "Bands: paint_band(start, end, color) paints every height from start to end, both included; where bands "
+    "overlap or touch, the later band wins."
 )
 
 
@@ -448,7 +451,7 @@ class Workbench:
 
     @_locked
     def paint_band(self, start, end, color, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:
-        """Paint heights start..end one colour; later bands cover earlier ones."""
+        """Paint every height from start to end (both included) one colour; later bands cover earlier ones."""
         return self._edit({"op": "paint_band", "start": start, "end": end, "color": color}, expect, session, dry_run)
 
     @_locked
@@ -503,7 +506,10 @@ class Workbench:
         if not st.protocol:
             st.phase = "DONE"
             save(st, self.home)
-            return ToolResult("Session closed.")
+            passed = sum(ok for _, ok, _ in exam.criteria)
+            lines = [f"Session closed. Acceptance: {passed}/{len(exam.criteria)} criteria pass."]
+            lines += [f"  FAIL  {cid}: {measured}" for cid, ok, measured in exam.criteria if not ok]
+            return ToolResult("\n".join(lines))
         lines = ["EXAM:"]
         for r in exam.errors:
             lines.append(f"  [ERROR] {r.id}: {r.message}")

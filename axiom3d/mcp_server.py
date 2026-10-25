@@ -98,7 +98,7 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
     @tool
     def paint_band(start: float, end: float, color: str, expect: list[str] | str | None = None,
                    dry_run: bool = False) -> list | str:
-        """Vessels: paint heights start..end (m) red, blue, white, green, yellow, black, gold or #rrggbb; later bands cover earlier ones."""
+        """Vessels: paint heights start to end (m, both included) red, blue, white, green, yellow, black, gold or #rrggbb; later bands cover earlier ones."""
         return _reply(lambda: wb.paint_band(start, end, color, expect, dry_run))
 
     @tool

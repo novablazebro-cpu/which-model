@@ -46,6 +46,7 @@ ATTRS = {
     "mouth_diameter": "mouth_diameter",
     "neck_diameter": "neck_diameter",
     "waist_diameter": "waist_diameter",
+    "waist_height": "waist_height",
     "foot_diameter": "foot_diameter",
     "capacity": "capacity_l",
     "tip_angle": "tip_angle_deg",
@@ -85,6 +86,7 @@ class VesselMeasures:
     mouth_diameter: float
     neck_diameter: float
     waist_diameter: float
+    waist_height: float
     foot_diameter: float
     capacity_l: float
     tip_angle_deg: float
@@ -257,6 +259,7 @@ def _measures(h, r, capacity_l, com_h, color) -> VesselMeasures:
     shoulder = float((h[top[0]] + h[top[-1]]) / 2)
     above, below = r[h >= shoulder - 1e-12], r[h <= shoulder + 1e-12]
     foot = float(r[0])
+    waist = int(np.argmin(below)) if len(below) else 0  # the lowest of equal minima: below runs from the base up
     return VesselMeasures(
         height=height,
         max_diameter=2 * float(r.max()),
@@ -265,6 +268,7 @@ def _measures(h, r, capacity_l, com_h, color) -> VesselMeasures:
         mouth_diameter=2 * float(r[-1]),
         neck_diameter=2 * float(above.min() if len(above) else r[-1]),
         waist_diameter=2 * float(below.min() if len(below) else r[0]),
+        waist_height=float(h[waist] - h[0]),
         foot_diameter=2 * foot,
         capacity_l=capacity_l,
         tip_angle_deg=math.degrees(math.atan2(foot, com_h)) if com_h > 0 else 90.0,

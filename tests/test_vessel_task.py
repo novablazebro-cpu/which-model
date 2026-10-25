@@ -4,6 +4,7 @@ from axiom3d.anim.commands import CommandError, apply_command
 from axiom3d.anim.evaluate import evaluate_clip
 from axiom3d.api import AxiomError, Workbench
 from axiom3d.checks.base import CheckContext, run_checks
+from axiom3d.guide import read_topic
 from axiom3d.model.vessel import measure_spec
 from axiom3d.protocol.predict import PredictionError, evaluate_prediction, is_precise, parse_prediction
 from axiom3d.session_store import current_id, load
@@ -178,3 +179,62 @@ def test_bare_vase_and_calc(home):
     dry = wb.paint_band(start=0, end=0.4, color="gold", dry_run=True).text
     assert dry.startswith("DRY RUN") and "colour" in dry
     assert len(load(current_id(home), home).commands) == 1
+
+
+# Friction found by the Haiku vase runs (docs/eval/2026-10-25-haiku-vase.md, F1-F4).
+
+def test_band_ends_are_inclusive_and_the_docs_say_so(home, skel):
+    # F3: a run predicted that paint_band leaves out its end height.
+    clip, _ = build(skel, [shape(ref_profile()), {"op": "paint_band", "start": 0, "end": 0.4, "color": "red"},
+                           {"op": "paint_band", "start": 0, "end": 0.05, "color": "blue"}])
+    assert clip.vessel.color_at(0.05) == "#1f3f8f"
+    assert "both included" in Workbench(home).start_session(TID).text
+    assert "both included" in read_topic("vessels")
+
+
+def test_start_text_shows_finish_claims_as_a_list(home):
+    # F4: a run sent its claims as one prose string and lost a call.
+    assert 'finish(claims=["vessel.' in Workbench(home).start_session(TID).text
+
+
+def test_tools_guide_covers_vessels_and_says_the_quiz_is_protocol_only():
+    # F1: the bare run read guide('tools'), expected a quiz and found only walking tools.
+    text = read_topic("tools")
+    assert "shape_profile" in text and "paint_band" in text and "vessels" in text
+    assert "protocol" in text.split("answer_quiz", 1)[1][:160]
+
+
+def test_bare_finish_reports_the_acceptance_result(home):
+    # F2: bare finish said only "Session closed.", so the run could not tell whether it passed.
+    wb = Workbench(home, protocol=False)
+    wb.start_session(TID)
+    wb.batch(reference_commands(TID))
+    assert wb.finish().text.startswith("Session closed. Acceptance: 11/11 criteria pass.")
+    wb.start_session(TID)
+    text = wb.finish().text
+    assert "Acceptance: 0/11" in text and "FAIL  height" in text
+
+
+# The hourglass the user saw: the protocol run of 2026-10-25 put its waist at 0.07 m (0.175 H), above the
+# blue foot band, and every criterion passed because none measured where the waist is.
+HOURGLASS = [[0, 0.064], [0.03, 0.06], [0.07, 0.05], [0.14, 0.072], [0.2, 0.094], [0.288, 0.108], [0.315, 0.09],
+             [0.345, 0.04], [0.37, 0.018], [0.4, 0.02]]
+
+
+def test_the_waist_height_is_measured(skel):
+    assert measure_spec(build(skel, [shape(ref_profile())])[0].vessel).waist_height == pytest.approx(0.04, abs=1e-6)
+    assert measure_spec(build(skel, [shape(HOURGLASS)])[0].vessel).waist_height == pytest.approx(0.07, abs=1e-6)
+
+
+def test_a_waist_high_above_the_foot_fails_the_meiping(skel):
+    graded = {cid: (ok, why) for cid, ok, why in grade_vessel(measure_spec(build(skel, [shape(HOURGLASS)])[0].vessel))}
+    assert graded["waist_low"] == (False, "waist at h 0.070 m = 0.175 x height")
+    assert dict((c, ok) for c, ok, _ in grade_vessel(measure_spec(build(skel, [shape(ref_profile())])[0].vessel)))["waist_low"]
+
+
+def test_the_report_and_calc_show_where_the_waist_is(home):
+    wb = Workbench(home, protocol=False)
+    wb.start_session(TID)
+    wb.shape_profile(HOURGLASS)
+    assert "waist 0.100 at h 0.070" in wb.observe(views=["report"]).text
+    assert "0.07" in wb.calc("vessel.waist_height").text
