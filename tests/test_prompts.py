@@ -40,3 +40,23 @@ def test_raw_prompt_gives_the_same_task_without_the_tool():
     assert "/tmp/raw/vase.obj" in text and "v x y z r g b" in text and "Z is up" in text
     assert "#b3261e" in text and "watertight" in text and "60 tool calls" in text
     assert "axiom3d" not in text.split("Rules:")[0] and "shape_profile" not in text
+
+
+def test_blocks_cli_prompt_uses_block_tools_and_allows_its_images():
+    text = make_prompt("minecraft_creeper", bare=False, via="cli", workdir="/w", label="x")
+    assert "3D modeling tool" in text and "add_box, remove_box, paint_face" in text
+    assert "guide topics: conventions, blocks, predictions" in text and "image: PATH" in text
+    assert "shape_profile" not in text and "plant_foot" not in text
+
+
+def test_blocks_raw_prompt_gives_the_same_task_and_conventions_without_the_tool():
+    from axiom3d.api import BLOCKS_CONVENTIONS
+    from axiom3d.eval.prompts import raw_prompt
+    from axiom3d.tasks.library import get_task
+
+    text = raw_prompt("minecraft_creeper", "/w")
+    task = get_task("minecraft_creeper")
+    assert task.goal in text and all(c.description in text for c in task.criteria)
+    assert BLOCKS_CONVENTIONS in text  # the same conventions the tool prints at start_session
+    assert "/w/creeper.json" in text and '"op": "add_box"' in text and '"op": "paint_face"' in text
+    assert "axiom3d call" not in text and "Do NOT read" in text
