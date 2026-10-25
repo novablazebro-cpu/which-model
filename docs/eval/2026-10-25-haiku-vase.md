@@ -80,6 +80,22 @@ It read the hourglass warning in the guide, called `observe(views=['sheet'])` an
 
 The 15% limit was set after seeing these five vases: it passes the four that look right and fails the one that does not. One good re-run is evidence that the fix works, not proof.
 
+## The bottoms: three tool defects and two design habits
+
+Seen close up, every bottom looked worse than every top. Measured causes:
+
+| cause | whose | evidence | fix (commit `54ca0aa`) |
+|---|---|---|---|
+| base disk and wall shared one ring of vertices, so normals pointed 83.7° down: viewers and Blender (via the GLB) shaded the base edge as a dark smear | tool | normals measured on the protocol re-run's mesh | `display_mesh` splits vertices at the base edge, lip, inner floor and band edges; export and the sheet use it |
+| colours blended across one sample (~4 mm) at every band edge | tool | per-vertex colours on one shared ring | same: one colour per triangle |
+| the curve's end slope extrapolated the next segment: a 31.45° skirt where the points asked for 20.56° (every foot flare exaggerated by about half) | tool | `radius_at` tangent, old code vs new | the ends take their own segment's slope |
+| pinches 2-3x deeper than the reference (12-15 mm per side) | Haiku | all three Haiku feet | not fixed: a style reference, see below |
+| lower bodies bulging 6-10 mm outside a straight taper (the no-tool vase too) | Haiku | all three Haiku vases | not fixed: a style reference, see below |
+
+The sheet image Haiku looks at is flat-shaded at 384 px with the foot about 40 px tall, and shows no reference, so the re-run "looked" and could not see either habit.
+
+Adding criteria one by one (waist height, then pinch depth, then bulge) is whack-a-mole. The general fix is a style reference: a measured meiping profile the tool compares against, reporting where the shape departs from it, plus a close-up view of the foot and lip.
+
 ## Friction found in the tool (fixed after this run)
 
 | # | what happened | evidence | fix |
