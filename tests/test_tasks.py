@@ -22,7 +22,7 @@ def test_reference_meets_criteria(skel, tid):
         assert ok, (tid, crit.id, measured)
 
 
-@pytest.mark.parametrize("tid", [t for t in TASKS if TASKS[t].kind != "vessel"])
+@pytest.mark.parametrize("tid", [t for t in TASKS if TASKS[t].kind not in ("vessel", "blocks")])  # mannequin tasks
 def test_reference_is_not_a_crouch(skel, tid):
     # Real walking keeps the stance knee near 5-15 deg; a constant low pelvis gives ~34 deg.
     from axiom3d.measure import foot_contact

@@ -39,10 +39,16 @@ def _check_delta(skel, kind, before, after) -> list[str]:
 
 def describe_diff(skel, kind, before, after, frame: int, limit: int = 12) -> list[str]:
     (clip_a, states_a), (clip_b, states_b) = before, after
-    if kind == "vessel":
-        from axiom3d.perceive.vessel import vessel_diff
+    if kind in ("vessel", "blocks"):
+        if kind == "vessel":
+            from axiom3d.perceive.vessel import vessel_diff
 
-        lines = vessel_diff(clip_a.vessel, clip_b.vessel) + _check_delta(skel, kind, before, after)
+            lines = vessel_diff(clip_a.vessel, clip_b.vessel)
+        else:
+            from axiom3d.perceive.blocks import blocks_diff
+
+            lines = blocks_diff(clip_a.blocks, clip_b.blocks)
+        lines += _check_delta(skel, kind, before, after)
         return ["CHANGED:"] + lines if lines else ["CHANGED: nothing measurable"]
     i = frame - states_a[0].frame
     a, b = states_a[i], states_b[i]

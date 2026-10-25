@@ -12,6 +12,7 @@ from axiom3d.anim.commands import apply_command
 from axiom3d.anim.evaluate import evaluate_clip
 from axiom3d.api import AxiomError, Workbench
 from axiom3d.measure import track_coords
+from axiom3d.model.blocks import face_name, face_size, measure_blocks, pixel_color
 from axiom3d.model.vessel import color_name, measure_cached
 from axiom3d.rig.humanoid import build_mannequin
 from axiom3d.session_store import current_id, load
@@ -22,8 +23,25 @@ AUTO = "AUTO"  # answer_quiz placeholder: fill in the session's own answers
 Step = tuple[str, dict]
 
 
-def _honest_expect(skel, clip, cmd: dict) -> list[str]:
+def _blocks_expect(before, clip, cmd: dict) -> list[str]:
+    if cmd["op"] == "add_box":
+        b = clip.blocks.get(cmd["name"])
+        return [f"box.{b.name}.min_z ~= {b.low[2]} ± 0.5", f"box.{b.name}.max_z ~= {b.high[2]} ± 0.5"]
+    if cmd["op"] == "remove_box":
+        return [f"model.height ~= {measure_blocks(clip.blocks).height} ± 0.5"]
+    box, old = clip.blocks.get(cmd["box"]), before.blocks.get(cmd["box"])
+    face = face_name(cmd["face"])
+    cols, rows = face_size(box, face)
+    changed = [(r, c) for r in range(rows) for c in range(cols)
+               if pixel_color(box, face, r, c) != pixel_color(old, face, r, c)]
+    r, c = changed[0] if changed else (0, 0)
+    return [f"pixel({box.name}, {face}, {r + 1}, {c + 1}) is {color_name(pixel_color(box, face, r, c))}"]
+
+
+def _honest_expect(skel, clip, cmd: dict, before=None) -> list[str]:
     """Predictions computed by actually simulating the edit, as a careful model would."""
+    if cmd["op"] in ("add_box", "remove_box", "paint_face"):
+        return _blocks_expect(before, clip, cmd)
     if cmd["op"] == "shape_profile":
         m = measure_cached(clip.vessel)
         return [f"vessel.height ~= {m.height:.3f} ± 0.005", f"vessel.max_diameter ~= {m.max_diameter:.3f} ± 0.005",
@@ -71,9 +89,13 @@ def _honest_script(task_id: str, commands: list[dict]) -> list[Step]:
     clip = new_clip(get_task(task_id), skel)
     steps: list[Step] = [("start_session", {"task": task_id}), ("answer_quiz", {"answers": AUTO})]
     for cmd in commands:
-        clip = apply_command(skel, clip, cmd)
+        before, clip = clip, apply_command(skel, clip, cmd)
         args = {k: v for k, v in cmd.items() if k != "op"}
-        steps.append((cmd["op"], {**args, "expect": _honest_expect(skel, clip, cmd)}))
+        steps.append((cmd["op"], {**args, "expect": _honest_expect(skel, clip, cmd, before)}))
+    if clip.blocks is not None:
+        m = measure_blocks(clip.blocks)
+        return steps + [("finish", {"claims": [f"model.height ~= {m.height} ± 0.5",
+                                               f"model.width ~= {m.width} ± 0.5"]})]
     if clip.vessel is not None:
         m = measure_cached(clip.vessel)
         claims = [f"vessel.shoulder_ratio ~= {m.shoulder_ratio:.3f} ± 0.01",

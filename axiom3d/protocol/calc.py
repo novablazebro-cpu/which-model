@@ -16,6 +16,7 @@ import numpy as np
 
 from axiom3d.conventions import FORWARD0, LEFT0, UP, character_axes, track_to_world, world_to_track
 from axiom3d.model.vessel import ATTRS as VESSEL_ATTRS
+from axiom3d.protocol.predict import BOX_ATTRS, MODEL_ATTRS, Subject, _blocks_value
 from axiom3d.model.vessel import measure_cached, radius_at
 
 MAX_SOURCE = 500
@@ -76,7 +77,7 @@ class _Calc:
             "track": self._track, "char": self._char, "world_from_track": self._world_from_track,
             "reach": self._reach, "knee_needed": self._knee_needed, "radius_at": self._radius_at,
         }
-        self.reserved = set(self.consts) | set(self.funcs) | self.points | {"root", "vessel"}
+        self.reserved = set(self.consts) | set(self.funcs) | self.points | {"root", "vessel", "box", "model"}
 
     # ---- value helpers -------------------------------------------------------------------
     def _num(self, x) -> float:
@@ -147,6 +148,17 @@ class _Calc:
         cos_k = (a * a + b * b - length * length) / (2 * a * b)
         return 180.0 - math.degrees(math.acos(max(-1.0, min(1.0, cos_k))))
 
+    def _blocks(self, subj):
+        allowed = BOX_ATTRS if subj.kind == "box" else MODEL_ATTRS
+        if subj.attr not in allowed:
+            raise CalcError(f"{subj.kind} has {', '.join(allowed)}; got {subj.attr}")
+        value = _blocks_value(subj, self.clip)
+        if value != value:  # NaN: nothing there
+            names = ", ".join(b.name for b in self.clip.blocks.boxes) if self.clip.blocks else ""
+            raise CalcError(f"no box {subj.name!r}; boxes: {names or 'none yet'}" if subj.kind == "box"
+                            else "the model has no boxes yet")
+        return value
+
     def _vessel(self):
         if self.clip.vessel is None:
             raise CalcError("no profile yet: call shape_profile first")
@@ -170,6 +182,12 @@ class _Calc:
     # ---- scene references --------------------------------------------------------------------
     def _ref(self, node, frame):
         """Value of a scene reference at `frame`, or None if `node` is not a scene reference."""
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name) and node.value.value.id == "box" and "box" not in self.vars):
+            return self._blocks(Subject("box", node.value.attr, node.attr))
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "model"
+                and "model" not in self.vars):
+            return self._blocks(Subject("model", "model", node.attr))
         if isinstance(node, ast.Name) and node.id in self.points and node.id not in self.vars:
             return self._state(frame).points[node.id].copy()
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):

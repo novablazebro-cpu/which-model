@@ -8,11 +8,13 @@ import math
 
 from axiom3d.anim.clip import ROOT_CHANNELS, Clip, Plant, PoseKey, RootKey, Swing
 from axiom3d.conventions import track_to_world
+from axiom3d.model.blocks import BlockModel, BlocksError, apply_blocks_command
 from axiom3d.model.vessel import MAX_HEIGHT, Band, VesselError, VesselSpec, parse_color, validate
 
 SIDES = ("left", "right")
 VESSEL_OPS = ("shape_profile", "paint_band")
-OPS = ("set_root", "set_pose", "plant_foot", "swing_foot") + VESSEL_OPS
+BLOCKS_OPS = ("add_box", "remove_box", "paint_face")
+OPS = ("set_root", "set_pose", "plant_foot", "swing_foot") + VESSEL_OPS + BLOCKS_OPS
 MAX_BANDS = 32
 DEFAULT_WALL = 0.006
 MIN_APEX = 0.03
@@ -102,6 +104,11 @@ def apply_command(skel, clip: Clip, cmd: dict) -> Clip:
         _swing(clip, cmd)
     elif op == "shape_profile":
         _shape(clip, cmd)
+    elif op in BLOCKS_OPS:
+        try:
+            clip.blocks = apply_blocks_command(clip.blocks or BlockModel(()), cmd)
+        except BlocksError as e:
+            raise CommandError(str(e)) from None
     else:
         _paint(clip, cmd)
     return clip

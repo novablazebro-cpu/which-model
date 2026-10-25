@@ -52,7 +52,7 @@ def test_cli_tasks(capsys):
 
 
 def test_guide_topics(home):
-    assert set(TOPICS) == {"conventions", "walking", "vessels", "predictions", "calculator", "tools"}
+    assert set(TOPICS) == {"conventions", "walking", "vessels", "blocks", "predictions", "calculator", "tools"}
     assert "lower the pelvis" in read_topic("walking").lower()
     assert "~=" in read_topic("predictions")
     with pytest.raises(KeyError, match="walking"):

@@ -1,4 +1,4 @@
-"""MCP server: the 17 axiom3d tools, each a thin wrapper over the Workbench."""
+"""MCP server: the 20 axiom3d tools, each a thin wrapper over the Workbench."""
 
 from __future__ import annotations
 
@@ -12,7 +12,8 @@ INSTRUCTIONS = """\
 axiom3d is a 3D workbench built for AI models. The tool computes the geometry; you decide.
 1) start_session(task), then answer_quiz: editing unlocks when every answer is right.
 2) observe: trust the numbers in the report over your reading of images.
-3) Edit with set_root / set_pose / plant_foot / swing_foot (vessels: shape_profile / paint_band);
+3) Edit with set_root / set_pose / plant_foot / swing_foot (vessels: shape_profile / paint_band;
+   blocks: add_box / remove_box / paint_face);
    every edit needs expect=[precise predictions].
 4) A failed prediction blocks edits until undo() or accept_discrepancy(reason).
 5) finish(claims) only certifies passing work. NOT CERTIFIED means the task is not done."""
@@ -100,6 +101,23 @@ def build_server(home: Path, protocol: bool = True, label: str | None = None) ->
                    dry_run: bool = False) -> list | str:
         """Vessels: paint heights start to end (m, both included) red, blue, white, green, yellow, black, gold or #rrggbb; later bands cover earlier ones."""
         return _reply(lambda: wb.paint_band(start, end, color, expect, dry_run))
+
+    @tool
+    def add_box(name: str, low: list[int], high: list[int], color: str = "green",
+                expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:
+        """Blocks: a box from corner low=[x, y, z] to high=[x, y, z] in whole pixels (Z up; the model faces -Y, its left is +X). The same name replaces it."""
+        return _reply(lambda: wb.add_box(name, low, high, color, expect, dry_run))
+
+    @tool
+    def remove_box(name: str, expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:
+        """Blocks: remove a box by name."""
+        return _reply(lambda: wb.remove_box(name, expect, dry_run))
+
+    @tool
+    def paint_face(box: str, face: str, pixels: list[str], key: dict[str, str] | None = None,
+                   expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:
+        """Blocks: paint a face (front -Y, back, left +X, right, top, bottom) pixel by pixel: one string per row, top row first, as seen looking at that face; g green, k black, w white, r red, b blue, y yellow, o gold, . keep."""
+        return _reply(lambda: wb.paint_face(box, face, pixels, key, expect, dry_run))
 
     @tool
     def batch(edits: list[dict], expect: list[str] | str | None = None, dry_run: bool = False) -> list | str:

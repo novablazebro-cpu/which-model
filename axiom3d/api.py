@@ -11,11 +11,12 @@ from pathlib import Path
 
 import numpy as np
 
-from axiom3d.anim.commands import VESSEL_OPS, CommandError, apply_command
+from axiom3d.anim.commands import BLOCKS_OPS, VESSEL_OPS, CommandError, apply_command
 from axiom3d.anim.evaluate import evaluate_clip
 from axiom3d.checks.base import CheckContext, run_checks
 from axiom3d.conventions import CONVENTIONS_TEXT
 from axiom3d.perceive.diff import describe_diff
+from axiom3d.perceive.blocks import describe_blocks
 from axiom3d.perceive.vessel import describe_vessel, vessel_diff
 from axiom3d.perceive.render import render_filmstrip, render_footprints, render_sheet, to_png
 from axiom3d.perceive.report import describe_frame, describe_timeline
@@ -29,6 +30,7 @@ from axiom3d.tasks.library import get_task
 
 VIEWS = ("report", "timeline", "sheet", "filmstrip", "footprints")
 VESSEL_VIEWS = ("report", "sheet")
+BLOCKS_VIEWS = ("report", "sheet")
 EXPECT_HELP = (
     "Every edit needs expect=[...]: at least one PRECISE prediction of what the edit will do; the tool measures "
     "it after applying the edit. Examples: 'left_ankle.forward ~= 0.36 ± 0.05', 'left_toe in_front_of pelvis', "
@@ -64,6 +66,39 @@ VESSEL_CONVENTIONS = (
 )
 
 
+BLOCKS_EXPECT_HELP = (
+    "Every edit needs expect=[...]: at least one PRECISE prediction of what the edit will do; the tool measures "
+    "it after applying the edit. Examples: 'box.arm.max_z ~= 14 ± 0.5', 'box.arm.min_x >= box.chest.max_x', "
+    "'model.height ~= 30 ± 1', 'pixel(chest, front, 2, 5) is white' (row 1 = top, column 1 = left, as seen "
+    "looking at that face). Precise = within 1 px, a pixel colour, or a comparison. See guide('blocks')."
+)
+BLOCKS_WORKFLOW = (
+    "WORKFLOW: 1) answer_quiz  2) add_box(name, low, high) with expect=[predictions], one box at a time or several "
+    "in a batch  3) paint_face(box, face, pixels) with expect  4) observe(views=['sheet']) and check: look at the "
+    "model, the criteria do not judge everything  5) finish(claims=[\"model.height ~= 30 ± 1\", "
+    "\"pixel(chest, front, 2, 5) is white\"]): a LIST of short claims, not prose.\n"
+    "Tip: work out every corner with calc before you place a box, e.g. calc('z = 6 + 12'). guide('blocks') has "
+    "the pixel order of every face and the mistakes models make most."
+)
+BLOCKS_CONVENTIONS = (
+    "Frame: right-handed, Z up, units are pixels (16 px = 1 block = 1 m). The model stands on z = 0, "
+    "faces -Y, and its left is +X.\n"
+    "Boxes: add_box(name, low=[x, y, z], high=[x, y, z]) with whole-pixel corners; size = high - low.\n"
+    "Faces: front (-Y), back (+Y), left (+X), right (-X), top (+Z), bottom (-Z). paint_face pixels go top row "
+    "first, as seen looking at that face from outside; on the front, the viewer's left is the model's right."
+)
+KINDS = {"vessel": VESSEL_OPS, "blocks": BLOCKS_OPS}  # task kinds with their own edit ops
+
+
+def _texts(kind: str) -> tuple[str, str, str]:
+    """(expect help, conventions, workflow) for a task kind."""
+    if kind == "vessel":
+        return VESSEL_EXPECT_HELP, VESSEL_CONVENTIONS, VESSEL_WORKFLOW
+    if kind == "blocks":
+        return BLOCKS_EXPECT_HELP, BLOCKS_CONVENTIONS, BLOCKS_WORKFLOW
+    return EXPECT_HELP, CONVENTIONS_TEXT, WORKFLOW
+
+
 class AxiomError(Exception):
     pass
 
@@ -79,8 +114,8 @@ def _prediction_frame(cmd: dict) -> int:
     A batch uses its last edit's frame."""
     if cmd["op"] == "batch":
         return _prediction_frame(cmd["edits"][-1])
-    if cmd["op"] in VESSEL_OPS:
-        return 0  # vessels are static: a single frame
+    if cmd["op"] in VESSEL_OPS + BLOCKS_OPS:
+        return 0  # vessels and block models are static: a single frame
     if cmd["op"] in ("set_root", "set_pose"):
         return int(float(cmd["frame"]))
     if cmd["op"] == "swing_foot":
@@ -99,6 +134,10 @@ def _describe(cmd: dict) -> str:
         pts = cmd["points"]
         return (f"shape_profile({len(pts)} points, height {float(pts[-1][0]):.3f} m, "
                 f"wall {float(cmd.get('wall', 0.006)):.3f})")
+    if cmd["op"] == "paint_face":
+        pixels = cmd.get("pixels")
+        n = len(pixels) if isinstance(pixels, (list, tuple)) else "?"
+        return f"paint_face(box={cmd.get('box')}, face={cmd.get('face')}, {n} rows)"
     args = ", ".join(f"{k}={v}" for k, v in cmd.items() if k != "op")
     return f"{cmd['op']}({args})"
 
@@ -167,17 +206,17 @@ class Workbench:
         st = new_session(task, self.protocol, self.label, self.home, self.skel)
         save(st, self.home)
         self.session_id = st.id
-        vessel = spec.kind == "vessel"
+        _, conventions, workflow = _texts(spec.kind)
         lines = [
             f"SESSION {st.id}  task: {spec.title}",
             f"GOAL: {spec.goal}",
             "ACCEPTANCE (graded by the tool):",
             *[f"- {c.description}" for c in spec.criteria],
             "CONVENTIONS:",
-            VESSEL_CONVENTIONS if vessel else CONVENTIONS_TEXT,
+            conventions,
         ]
         if st.protocol:
-            lines += [VESSEL_WORKFLOW if vessel else WORKFLOW,
+            lines += [workflow,
                       'BRIEFING QUIZ: answer with answer_quiz(answers={"q1": "...", ..., "q5": "..."}):']
             for q in st.quiz:
                 choices = f"  [choices: {', '.join(q['choices'])}]" if q["choices"] else ""
@@ -254,6 +293,8 @@ class Workbench:
         clip, states = self._rebuild(st)
         if get_task(st.task_id).kind == "vessel":
             return self._observe_vessel(st, clip, states, views)
+        if get_task(st.task_id).kind == "blocks":
+            return self._observe_blocks(st, clip, states, views)
         views = list(views) if views else ["report", "timeline"]
         bad = [v for v in views if v not in VIEWS]
         if bad:
@@ -295,6 +336,23 @@ class Workbench:
             lines.append("IMAGES: vessel (side view with measurements, and the profile)")
         return ToolResult(self._finish_text(st, lines, clip, states), images)
 
+    def _observe_blocks(self, st, clip, states, views) -> ToolResult:
+        views = list(views) if views else ["report"]
+        bad = [v for v in views if v not in BLOCKS_VIEWS]
+        if bad:
+            raise AxiomError(f"unknown view {bad[0]!r} for a block model; views: {', '.join(BLOCKS_VIEWS)}")
+        lines, images = [], []
+        if "report" in views:
+            lines.append(describe_blocks(clip.blocks))
+        if "sheet" in views:
+            from axiom3d.perceive.render import render_blocks_sheet
+
+            if clip.blocks is None or not clip.blocks.boxes:
+                raise AxiomError("nothing to draw yet: call add_box first")
+            images.append(("blocks", to_png(render_blocks_sheet(clip.blocks))))
+            lines.append("IMAGES: blocks (front, right side, top and a three-quarter view)")
+        return ToolResult(self._finish_text(st, lines, clip, states), images)
+
     @_locked
     def check(self, session: str | None = None) -> ToolResult:
         st = self._load(session)
@@ -319,13 +377,17 @@ class Workbench:
             raise AxiomError("Session is finished; start a new one.")
         if st.protocol and st.phase == "BRIEFING":
             raise AxiomError("Pass the briefing quiz first: call answer_quiz.")
-        vessel = get_task(st.task_id).kind == "vessel"
+        kind = get_task(st.task_id).kind
+        vessel = kind == "vessel"
         ops = [e.get("op") if isinstance(e, dict) else None for e in cmd["edits"]] if cmd["op"] == "batch" else [cmd["op"]]
-        if vessel and any(op not in VESSEL_OPS for op in ops):
-            raise AxiomError("This is a vessel task: edit it with shape_profile and paint_band.")
-        if not vessel and any(op in VESSEL_OPS for op in ops):
-            raise AxiomError("shape_profile and paint_band are for vessel tasks; this task animates the mannequin.")
-        help_text = VESSEL_EXPECT_HELP if vessel else EXPECT_HELP
+        own = KINDS.get(kind)
+        for other, other_ops in KINDS.items():
+            if other != kind and any(op in other_ops for op in ops):
+                raise AxiomError(f"{', '.join(other_ops)} are for {other} tasks; this task uses "
+                                 f"{', '.join(own) if own else 'set_root / set_pose / plant_foot / swing_foot'}.")
+        if own and any(op not in own for op in ops):
+            raise AxiomError(f"This is a {kind} task: edit it with {', '.join(own)}.")
+        help_text = _texts(kind)[0]
         if st.protocol and st.pending_discrepancy and not dry_run:
             raise AxiomError(
                 "Your last edit broke a prediction. Before editing again, call undo() to revert it, or "
@@ -360,13 +422,15 @@ class Workbench:
                 graded.append((p, new, new.measured != old.measured))
         except PredictionError as e:
             raise AxiomError(f"{e}\n{help_text}") from None
-        changed_scene = not _same_scene(states_before, states) or before.vessel != clip.vessel
+        changed_scene = (not _same_scene(states_before, states) or before.vessel != clip.vessel
+                         or before.blocks != clip.blocks)
         if st.protocol and changed_scene and not any(changed and is_precise(p) for p, _, changed in graded):
             st.ledger["rejected_edits"] += 1
             save(st, self.home)
             example = ("e.g. color(h) is <colour> inside a painted band, or a measurement this shape changes"
-                       if vessel else f"e.g. the moved point or angle at the edited frame (@{frame}) or at another "
-                                      "frame it affects")
+                       if vessel else "e.g. a corner of the box you add (box.<name>.max_z), or a pixel you paint"
+                       if kind == "blocks" else f"e.g. the moved point or angle at the edited frame (@{frame}) or "
+                                                "at another frame it affects")
             raise AxiomError(
                 "None of your precise predictions measures something this edit changes, so it can't show you "
                 f"understood the edit. Predict its effect, {example}. {help_text}"
@@ -453,6 +517,26 @@ class Workbench:
     def paint_band(self, start, end, color, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:
         """Paint every height from start to end (both included) one colour; later bands cover earlier ones."""
         return self._edit({"op": "paint_band", "start": start, "end": end, "color": color}, expect, session, dry_run)
+
+    @_locked
+    def add_box(self, name, low, high, color="green", expect=None, dry_run: bool = False,
+                session: str | None = None) -> ToolResult:
+        """Add a box from corner low=[x, y, z] to high=[x, y, z] in whole pixels; the same name replaces it."""
+        return self._edit({"op": "add_box", "name": name, "low": low, "high": high, "color": color},
+                          expect, session, dry_run)
+
+    @_locked
+    def remove_box(self, name, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:
+        return self._edit({"op": "remove_box", "name": name}, expect, session, dry_run)
+
+    @_locked
+    def paint_face(self, box, face, pixels, key=None, expect=None, dry_run: bool = False,
+                   session: str | None = None) -> ToolResult:
+        """Paint one face pixel by pixel: rows top first, as seen looking at that face from outside."""
+        cmd = {"op": "paint_face", "box": box, "face": face, "pixels": pixels}
+        if key:
+            cmd["key"] = key
+        return self._edit(cmd, expect, session, dry_run)
 
     @_locked
     def batch(self, edits, expect=None, dry_run: bool = False, session: str | None = None) -> ToolResult:

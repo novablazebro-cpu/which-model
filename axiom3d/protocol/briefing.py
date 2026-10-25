@@ -148,6 +148,29 @@ def make_vessel_quiz(seed: int) -> list[Question]:
     return [q1, q2, q3, q4, q5]
 
 
+def make_blocks_quiz(seed: int) -> list[Question]:
+    """Block briefing: the facing, the mirror between viewer and model, pixel order, and stacking arithmetic."""
+    rng = np.random.default_rng(seed)
+    q1 = Question("q1", "Which world axis does a model's FRONT face point along?", "choice",
+                  ("-Y", "+Y", "+X", "-X"), "-Y", None,
+                  "axiom3d models face -Y, and their own left is +X.")
+    q2 = Question("q2", "You stand in front of the model, looking at its face. Is your left hand on the model's "
+                        "left or on its right?", "choice", ("left", "right"), "right", None,
+                  "facing each other, left and right swap: your left is the model's right. On the front face, "
+                  "columns run from -X (the model's right) to +X (its left).")
+    a = int(rng.choice((2, 3, 5, 7)))
+    b = a + int(rng.choice((5, 9, 11, 13)))
+    q3 = Question("q3", f"A box goes from low z = {a} to high z = {b}. How many px tall is it?", "number",
+                  None, f"{b - a}", 0.0, "height = high z - low z.")
+    q4 = Question("q4", "In paint_face, which row of pixels comes first in the list?", "choice", ("top", "bottom"),
+                  "top", None, "rows are listed top row first, as seen looking at that face from outside.")
+    h = int(rng.choice((4, 5, 7, 9)))
+    q5 = Question("q5", f"Legs {h} px tall stand on the ground (z = 0). A body rests on top of them. What is the "
+                        "z of the body's low corner?", "number", None, f"{h}", 0.0,
+                  "a box rests on another when its low z equals the other's high z: here 0 + the leg height.")
+    return [q1, q2, q3, q4, q5]
+
+
 _SYNONYMS = {
     "front": "front", "forward": "front", "forwards": "front", "in front": "front",
     "back": "back", "backward": "back", "backwards": "back", "behind": "back",

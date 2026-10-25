@@ -105,6 +105,18 @@ _REFERENCE = {
         {"op": "paint_band", "start": 0.0, "end": 0.04, "color": "blue"},
         {"op": "paint_band", "start": 0.37, "end": 0.40, "color": "blue"},
     ],
+    "minecraft_creeper": [
+        # Pixels; the creeper faces -Y and its left is +X. The legs reach out in front of and behind the
+        # 4 px deep body, which rests on their inner edges (the game's model, from memory).
+        {"op": "add_box", "name": "leg_front_right", "low": [-4, -6, 0], "high": [0, -2, 6]},
+        {"op": "add_box", "name": "leg_front_left", "low": [0, -6, 0], "high": [4, -2, 6]},
+        {"op": "add_box", "name": "leg_back_right", "low": [-4, 2, 0], "high": [0, 6, 6]},
+        {"op": "add_box", "name": "leg_back_left", "low": [0, 2, 0], "high": [4, 6, 6]},
+        {"op": "add_box", "name": "body", "low": [-4, -2, 6], "high": [4, 2, 18]},
+        {"op": "add_box", "name": "head", "low": [-4, -4, 18], "high": [4, 4, 26]},
+        {"op": "paint_face", "box": "head", "face": "front", "pixels": [
+            "gggggggg", "gggggggg", "gkkggkkg", "gkkggkkg", "gggkkggg", "ggkkkkgg", "ggkkkkgg", "ggkggkgg"]},
+    ],
 }
 
 

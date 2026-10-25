@@ -7,9 +7,11 @@ Grammar (case-insensitive):
   <point> (in_front_of | behind | left_of | right_of | above | below) <point>
   <point> on_ground
   color(<height>) is <name | #rrggbb>           (vessels)
+  pixel(<box>, <face>, <row>, <col>) is <name | #rrggbb>   (blocks; row 1 = top, col 1 = left, as seen)
   subjects: <point>.(x|y|z|height|forward|left), root.(x|y|z|height|forward|left|heading),
             <channel> such as left_hip.flexion, (slide|min_height|max_height)(<point>),
-            vessel.(height|max_diameter|shoulder_ratio|...|capacity|tip_angle)
+            vessel.(height|max_diameter|shoulder_ratio|...|capacity|tip_angle),
+            box.<name>.(min_x|max_x|...|size_z|center_x|...), model.(width|depth|height|min_z|max_z)
   frames:   optional @N, @A..B or @all (after the subject or at the end)
 """
 
@@ -23,6 +25,7 @@ import numpy as np
 
 from axiom3d.conventions import CONTACT_EPS
 from axiom3d.measure import relation, track_coords
+from axiom3d.model.blocks import BlocksError, face_name, face_size, measure_blocks, pixel_color
 from axiom3d.model.vessel import ATTRS as VESSEL_ATTRS
 from axiom3d.model.vessel import VesselError, color_name, measure_cached, parse_color
 
@@ -36,11 +39,16 @@ PRECISE_SLIDE = 0.05
 # Vessels are small: a length is precise within 2 cm.
 PRECISE_VESSEL = {"shoulder_ratio": 0.05, "capacity": 0.5, "tip_angle": 5.0}
 PRECISE_VESSEL_M = 0.02
+# Blocks are whole pixels: a length is precise within 1 px.
+PRECISE_PX = 1.0
+BOX_ATTRS = tuple(f"{k}_{a}" for k in ("min", "max", "size", "center") for a in "xyz")
+MODEL_ATTRS = ("width", "depth", "height", "min_z", "max_z")
 
 _NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?"
 _NAME = r"[a-z_]+(?:\.[a-z_]+)?"
 _METRIC = r"(?:slide|min_height|max_height)\(\s*[a-z_]+\s*\)"
-_SUBJ = rf"(?:{_METRIC}|{_NAME})"
+_BOX = r"box\.[a-z0-9_]+\.[a-z_]+"
+_SUBJ = rf"(?:{_METRIC}|{_BOX}|{_NAME})"
 _FRAMES = re.compile(r"@\s*(all|\d+\s*\.\.\s*\d+|\d+)")
 
 
@@ -50,7 +58,7 @@ class PredictionError(ValueError):
 
 @dataclass(frozen=True)
 class Subject:
-    kind: str  # "point" | "root" | "channel" | "metric" | "vessel"
+    kind: str  # "point" | "root" | "channel" | "metric" | "vessel" | "box" | "model"
     name: str
     attr: str | None = None
 
@@ -64,7 +72,7 @@ class Frames:
 
 @dataclass(frozen=True)
 class Prediction:
-    kind: str  # "compare" | "relation" | "metric" | "color"
+    kind: str  # "compare" | "relation" | "metric" | "color" | "pixel"
     op: str
     subject: Subject | None = None
     other: Subject | None = None
@@ -75,6 +83,10 @@ class Prediction:
     point: str | None = None
     other_point: str | None = None
     color: str | None = None  # a palette name or #rrggbb
+    box: str | None = None  # pixel predictions: which box, face, row and column (1-based, as seen)
+    face: str | None = None
+    row: int | None = None
+    col: int | None = None
     frames: Frames = Frames()
     text: str = field(default="", compare=False)
 
@@ -106,6 +118,17 @@ def _subject(token: str, skel) -> Subject:
     if m:
         return Subject("metric", m.group(1), _point(m.group(2), skel))
     head, _, attr = token.partition(".")
+    if head == "box":
+        name, _, battr = attr.partition(".")
+        if battr not in BOX_ATTRS:
+            raise PredictionError(f"unknown box measurement {token!r}; use box.<name>.<one of "
+                                  f"{', '.join(BOX_ATTRS)}>, e.g. box.head.min_z")
+        return Subject("box", name, battr)
+    if head == "model":
+        if attr not in MODEL_ATTRS:
+            raise PredictionError(f"unknown model measurement {token!r}; use one of: "
+                                  f"{', '.join('model.' + a for a in MODEL_ATTRS)}")
+        return Subject("model", "model", attr)
     if head == "vessel":
         if attr not in VESSEL_ATTRS:
             raise PredictionError(f"unknown vessel measurement {token!r}; use one of: "
@@ -168,6 +191,18 @@ def parse_prediction(text: str, skel, variables: dict | None = None) -> Predicti
         except VesselError as e:
             raise PredictionError(str(e)) from None
         return Prediction("color", "is", value=float(m.group(1)), color=m.group(2), frames=frames, text=text)
+    m = re.fullmatch(r"pixel\( ?([a-z0-9_]+) ?, ?([a-z+\-]+) ?, ?(\d+) ?, ?(\d+) ?\) is (#?[a-z0-9]+)", body)
+    if m:
+        try:
+            face = face_name(m.group(2))
+            parse_color(m.group(5))
+        except (BlocksError, VesselError) as e:
+            raise PredictionError(str(e)) from None
+        row, col = int(m.group(3)), int(m.group(4))
+        if row < 1 or col < 1:
+            raise PredictionError("pixel rows and columns count from 1: row 1 is the top row, column 1 the left one")
+        return Prediction("pixel", "is", box=m.group(1), face=face, row=row, col=col, color=m.group(5),
+                          frames=frames, text=text)
     m = re.fullmatch(r"([a-z_]+) on_ground", body)
     if m:
         return Prediction("relation", "on_ground", point=_point(m.group(1), skel), frames=frames, text=text)
@@ -213,9 +248,11 @@ def _is_angle(subj: Subject) -> bool:
 
 
 def is_precise(p: Prediction) -> bool:
-    if p.kind in ("relation", "color") or p.other is not None:
+    if p.kind in ("relation", "color", "pixel") or p.other is not None:
         return True
-    if p.subject.kind == "vessel":
+    if p.subject.kind in ("box", "model"):
+        limit = PRECISE_PX
+    elif p.subject.kind == "vessel":
         limit = PRECISE_VESSEL.get(p.subject.attr, PRECISE_VESSEL_M)
     else:
         limit = PRECISE_DEG if _is_angle(p.subject) else PRECISE_M
@@ -244,6 +281,8 @@ def _select(frames: Frames, states, default_frame: int, metric: bool) -> list:
 
 
 def _value(subj: Subject, state, clip) -> float:
+    if subj.kind in ("box", "model"):
+        return _blocks_value(subj, clip)
     if subj.kind == "vessel":
         if clip.vessel is None:
             return float("nan")  # nothing measured yet: never equal to a prediction
@@ -259,6 +298,36 @@ def _value(subj: Subject, state, clip) -> float:
     return float(p["xyz".index(subj.attr)] if subj.attr in ("x", "y", "z") else p[2])
 
 
+def _blocks_value(subj: Subject, clip) -> float:
+    model = clip.blocks
+    if subj.kind == "model":
+        if model is None or not model.boxes:
+            return float("nan")
+        m = measure_blocks(model)
+        return float({"width": m.width, "depth": m.depth, "height": m.height, "min_z": m.low[2],
+                      "max_z": m.high[2]}[subj.attr])
+    box = model.get(subj.name) if model else None
+    if box is None:
+        return float("nan")  # no such box (yet): never equal to a prediction
+    kind, axis = subj.attr.split("_")
+    k = "xyz".index(axis)
+    return float({"min": box.low[k], "max": box.high[k], "size": box.size[k], "center": box.center[k]}[kind])
+
+
+def _pixel(p: Prediction, clip) -> Outcome:
+    box = clip.blocks.get(p.box) if clip.blocks else None
+    where = f"pixel({p.box}, {p.face}, {p.row}, {p.col})"
+    if box is None:
+        return Outcome(False, f"{where} = none (no box {p.box!r})")
+    cols, rows = face_size(box, p.face)
+    if p.row > rows or p.col > cols:
+        return Outcome(False, f"{where} = none (the {p.face} face of {p.box} is {cols} wide x {rows} tall)")
+    found = pixel_color(box, p.face, p.row - 1, p.col - 1)
+    target = parse_color(p.color)
+    ok = found == target if p.color.startswith("#") else color_name(found) == p.color
+    return Outcome(ok, f"{where} = {found} ({color_name(found)})")
+
+
 def _metric(subj: Subject, chosen) -> float:
     pts = np.array([s.points[subj.attr] for s in chosen])
     if subj.name == "slide":
@@ -269,6 +338,8 @@ def _metric(subj: Subject, chosen) -> float:
 def _label(subj: Subject) -> str:
     if subj.kind == "metric":
         return f"{subj.name}({subj.attr})"
+    if subj.kind == "box":
+        return f"box.{subj.name}.{subj.attr}"
     return subj.name if subj.kind == "channel" else f"{subj.name}.{subj.attr}"
 
 
@@ -303,6 +374,8 @@ def _color(p: Prediction, clip) -> Outcome:
 def evaluate_prediction(p: Prediction, skel, clip, states, default_frame: int) -> Outcome:
     if p.kind == "color":
         return _color(p, clip)
+    if p.kind == "pixel":
+        return _pixel(p, clip)
     chosen = _select(p.frames, states, default_frame, metric=p.kind == "metric")
     if p.kind == "metric":
         v = _metric(p.subject, chosen)

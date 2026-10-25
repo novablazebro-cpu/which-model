@@ -11,6 +11,7 @@ from axiom3d.anim.clip import Clip, Timeline
 from axiom3d.anim.commands import apply_command
 from axiom3d.conventions import TrackFrame, character_axes
 from axiom3d.measure import foot_contact, foot_xy, root_travel, swing_windows
+from axiom3d.model.blocks import FACES, BlockModel, face_size, measure_blocks, pixel_color
 from axiom3d.model.vessel import VesselMeasures, color_name, measure_cached
 
 
@@ -26,7 +27,7 @@ class Task:
     id: str
     title: str
     goal: str
-    kind: Literal["step", "walk", "pose", "vessel"]
+    kind: Literal["step", "walk", "pose", "vessel", "blocks"]
     timeline: Timeline
     start_heading_deg: float
     setup: tuple[dict, ...]
@@ -144,6 +145,155 @@ def _vessel_criterion(cid: str, description: str, fn) -> Criterion:
     return Criterion(cid, description, check)
 
 
+# The creeper's face, as seen looking at it: top row first, g = green, k = black.
+CREEPER_FACE = ("gggggggg", "gggggggg", "gkkggkkg", "gkkggkkg", "gggkkggg", "ggkkkkgg", "ggkkkkgg", "ggkggkgg")
+_LETTER = {"g": "green", "k": "black"}
+
+
+def _sized(model: BlockModel, size) -> list:
+    return [b for b in model.boxes if b.size == tuple(size)]
+
+
+def _one(model: BlockModel, size, what: str):
+    found = _sized(model, size)
+    return found[0] if len(found) == 1 else None, f"{len(found)} {what} box{'es' if len(found) != 1 else ''}"
+
+
+def _parts(model: BlockModel):
+    head, _ = _one(model, (8, 8, 8), "head")
+    body, _ = _one(model, (8, 4, 12), "body")
+    legs = _sized(model, (4, 4, 6))
+    return head, body, legs
+
+
+def _c_head(m):
+    head, n = _one(m, (8, 8, 8), "8x8x8")
+    return head is not None, f"{n} (the head)"
+
+
+def _c_body(m):
+    body, n = _one(m, (8, 4, 12), "8 wide x 4 deep x 12 tall")
+    turned = len(_sized(m, (4, 8, 12)))
+    return body is not None, f"{n}" + (f"; {turned} turned 90 deg (4 wide x 8 deep)" if turned else "")
+
+
+def _c_legs(m):
+    legs = _sized(m, (4, 4, 6))
+    return len(legs) == 4, f"{len(legs)} legs of 4 x 4 x 6"
+
+
+def _c_ground(m):
+    _, _, legs = _parts(m)
+    lowest = measure_blocks(m).low[2]
+    ok = bool(m.boxes) and lowest == 0 and len(legs) == 4 and all(b.low[2] == 0 for b in legs)
+    return ok, f"lowest z {lowest}; legs standing on z = 0: {sum(b.low[2] == 0 for b in legs)} of {len(legs)}"
+
+
+def _c_stack(m):
+    head, body, legs = _parts(m)
+    if head is None or body is None:
+        return False, "needs one head and one body"
+    ok = body.low[2] == 6 and head.low[2] == body.high[2] == 18 and measure_blocks(m).height == 26
+    return ok, (f"body z {body.low[2]}..{body.high[2]}, head z {head.low[2]}..{head.high[2]}, "
+                f"height {measure_blocks(m).height}")
+
+
+def _c_stance(m):
+    _, body, legs = _parts(m)
+    if body is None or len(legs) != 4:
+        return False, "needs one body and four legs"
+    cy, cx = body.center[1], body.center[0]
+    front = [b for b in legs if b.high[1] <= cy]
+    back = [b for b in legs if b.low[1] >= cy]
+    pairs_ok = all(sorted(b.center[0] < cx for b in pair) == [False, True] for pair in (front, back))
+    ok = len(front) == 2 and len(back) == 2 and pairs_ok
+    return ok, f"{len(front)} legs in front of the body's centre, {len(back)} behind" + (
+        "" if pairs_ok or not (len(front) == 2 and len(back) == 2) else "; a pair is on one side")
+
+
+def _c_centred(m):
+    head, body, _ = _parts(m)
+    if head is None or body is None:
+        return False, "needs one head and one body"
+    dx, dy = head.center[0] - body.center[0], head.center[1] - body.center[1]
+    return dx == 0 and dy == 0, f"head centre is {dx:+g}, {dy:+g} px from the body's"
+
+
+def _c_symmetric(m):
+    sym = measure_blocks(m).symmetric
+    return bool(m.boxes) and sym, "a mirror image across x = 0" if sym else "not a mirror image across x = 0"
+
+
+def _c_connected(m):
+    ms = measure_blocks(m)
+    ok = bool(m.boxes) and not ms.floating and not ms.overlaps
+    return ok, (f"floating: {', '.join(ms.floating) or 'none'}; "
+                f"overlapping: {', '.join(f'{a}+{b}' for a, b, _ in ms.overlaps) or 'none'}")
+
+
+def _pixels(m, skip_head_front: bool):
+    head, _, _ = _parts(m)
+    for b in m.boxes:
+        for f in FACES:
+            if skip_head_front and b is head and f == "front":
+                continue
+            cols, rows = face_size(b, f)
+            for r in range(rows):
+                for c in range(cols):
+                    yield b, f, color_name(pixel_color(b, f, r, c))
+
+
+def _c_green(m):
+    names = [n for _, _, n in _pixels(m, True)]
+    share = sum(n == "green" for n in names) / len(names) if names else 0.0
+    return share >= 0.95, f"{share:.0%} of the pixels outside the face are green"
+
+
+def _c_face(m):
+    head, _, _ = _parts(m)
+    if head is None:
+        return False, "no head to paint"
+    wrong = [(r, c) for r in range(8) for c in range(8)
+             if color_name(pixel_color(head, "front", r, c)) != _LETTER[CREEPER_FACE[r][c]]]
+    return not wrong, ("the front of the head shows the face" if not wrong else
+                       f"{len(wrong)} of 64 pixels differ from the face (first at row {wrong[0][0] + 1}, "
+                       f"column {wrong[0][1] + 1}, as seen from the front)")
+
+
+def _c_face_only(m):
+    black = sorted({f"{b.name} {f}" for b, f, n in _pixels(m, True) if n == "black"})
+    return bool(m.boxes) and not black, f"black pixels elsewhere: {', '.join(black) or 'none'}"
+
+
+CREEPER = (
+    ("head", "one head: an 8 x 8 x 8 px box", _c_head),
+    ("body", "one body: 8 px wide (X), 4 px deep (Y), 12 px tall (Z)", _c_body),
+    ("legs", "four legs: 4 x 4 x 6 px boxes", _c_legs),
+    ("ground", "it stands on the ground: the lowest point is z = 0 and every leg reaches it", _c_ground),
+    ("stack", "the body rests on the legs at z = 6 and the head on the body at z = 18; 26 px tall", _c_stack),
+    ("stance", "two legs in front of the body's centre and two behind, one on each side in each pair", _c_stance),
+    ("centred", "the head is centred over the body", _c_centred),
+    ("symmetric", "a mirror image of itself across x = 0", _c_symmetric),
+    ("connected", "no floating and no overlapping boxes", _c_connected),
+    ("green", "green all over: at least 95% of the pixels outside the face", _c_green),
+    ("face_front", "the face is on the FRONT of the head (-Y), right way up, as given", _c_face),
+    ("face_only_front", "no black pixels anywhere else", _c_face_only),
+)
+
+
+def grade_blocks(model: BlockModel | None, criteria=CREEPER) -> list[tuple[str, bool, str]]:
+    """Grade a block model directly. The same function grades models built without axiom3d."""
+    model = model or BlockModel(())
+    return [(cid, *fn(model)) for cid, _, fn in criteria]
+
+
+def _blocks_criterion(cid: str, description: str, fn) -> Criterion:
+    def check(skel, clip, states):
+        return fn(clip.blocks or BlockModel(()))
+
+    return Criterion(cid, description, check)
+
+
 TASKS: dict[str, Task] = {
     t.id: t
     for t in (
@@ -190,6 +340,22 @@ TASKS: dict[str, Task] = {
             0.0,
             (),
             tuple(_vessel_criterion(cid, desc, fn) for cid, desc, fn in MEIPING),
+        ),
+        Task(
+            "minecraft_creeper",
+            "Minecraft creeper",
+            "Model a Minecraft creeper from boxes, measured in Minecraft pixels (px; 16 px = 1 block). It stands "
+            "on four legs, each 4 px wide, 4 px deep and 6 px tall: two legs in front of the body and two behind "
+            "it, and in each pair one leg on the creeper's left and one on its right, so seen from the side the "
+            "legs reach out in front of and behind the body. The body is 8 px wide, 4 px deep and 12 px tall and "
+            "rests on the tops of the legs. The head is an 8 px cube resting on the body, centred over it. The "
+            "creeper faces -Y. Paint it green all over, and paint its face on the front of the head. Looking at "
+            "the creeper's face, top row first (g = green, k = black): " + " / ".join(CREEPER_FACE) + ".",
+            "blocks",
+            Timeline(fps=24, start=0, end=0),
+            0.0,
+            (),
+            tuple(_blocks_criterion(cid, desc, fn) for cid, desc, fn in CREEPER),
         ),
     )
 }

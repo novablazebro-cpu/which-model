@@ -31,7 +31,7 @@ FACES = ("front", "back", "left", "right", "top", "bottom")
 FACE_ALIASES = {"-y": "front", "+y": "back", "+x": "left", "-x": "right", "+z": "top", "-z": "bottom"}
 DEFAULT_KEY = {"g": "green", "k": "black", "w": "white", "r": "red", "b": "blue", "y": "yellow", "o": "gold"}
 KEEP = "."
-_NAME = re.compile(r"[A-Za-z0-9_\-]{1,32}")
+_NAME = re.compile(r"[a-z0-9_]{1,32}")  # lowercase: predictions are case-insensitive
 
 
 class BlocksError(ValueError):
@@ -137,7 +137,7 @@ def _color(text) -> str:
 def _add_box(model: BlockModel, cmd: dict) -> BlockModel:
     name = cmd.get("name")
     if not isinstance(name, str) or not _NAME.fullmatch(name):
-        raise BlocksError(f"a box needs a name of 1-32 letters, digits, - or _ (got {name!r})")
+        raise BlocksError(f"a box needs a name of 1-32 lowercase letters, digits or _, e.g. leg_front_left (got {name!r})")
     low, high = _corner(cmd.get("low"), "low"), _corner(cmd.get("high"), "high")
     for axis, a, b in zip("xyz", low, high):
         if b <= a:

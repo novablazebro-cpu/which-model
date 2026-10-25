@@ -6,6 +6,7 @@
    With the protocol off there is no quiz: start editing straight away.
 3. `observe(views)`: look at the result.
    - Vessels: `report` (measurements as text) and `sheet` (a side view beside the profile plot).
+   - Blocks: `report` (boxes, contacts, painted faces) and `sheet` (front, side, top, three-quarter).
    - Figures: `report`, `timeline`, `sheet`, `filmstrip` and `footprints`, at chosen `frames`.
    Trust the numbers over your reading of the images, but do look: the criteria do not judge everything.
 4. Edit. With the protocol on, every edit takes `expect=[...]`, predictions the tool checks after the edit.
@@ -15,6 +16,8 @@
      sets anatomical angles, e.g. {"left_shoulder.flexion": 15}; `plant_foot(side, start, end, forward, left,
      facing)` pins a foot and the tool solves the leg; `swing_foot(side, start, end, apex)` arcs a foot
      between two plants. See guide('walking').
+   - Blocks: `add_box(name, low, high, color)` places a box with whole-pixel corners; `remove_box(name)`;
+     `paint_face(box, face, pixels)` paints a face pixel by pixel, top row first as seen. See guide('blocks').
    - `batch(edits)`: several edits at once under one set of predictions; one `undo()` reverts them all.
    - Every edit takes `dry_run=true`: the tool evaluates it and shows what would change, but applies nothing.
    - Every edit result ends with `CHANGED:`, a numeric before/after diff. Trust it over images.
@@ -26,4 +29,4 @@
    The tool certifies only when every check, criterion and claim passes; NOT CERTIFIED means the task is not
    done. With the protocol off, `finish` closes the session and reports the acceptance result.
 9. `export()`: writes a .glb file that Blender opens.
-10. `guide(topic)`: conventions, walking, vessels, predictions, calculator, tools.
+10. `guide(topic)`: conventions, walking, vessels, blocks, predictions, calculator, tools.
