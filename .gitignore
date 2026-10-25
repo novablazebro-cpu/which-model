@@ -12,3 +12,11 @@ DerivedData/
 .cache/
 .DS_Store
 *.log
+
+# Tool state that does not belong in the repo.
+.antigravity/
+.axiom3d/
+.pytest_cache/
+*.egg-info/
+dist/
+build/

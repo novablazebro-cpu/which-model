@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "axiom3d"
+version = "0.1.0"
+description = "A 3D workbench built for AI models: the tool computes, the model decides, the tool grades."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "Pillow>=10",
+    "mcp>=2.3,<3",
+]
+
+[project.scripts]
+axiom3d = "axiom3d.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["axiom3d"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
