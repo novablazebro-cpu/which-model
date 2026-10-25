@@ -1,7 +1,7 @@
 # Read this first (memory for every Claude session on this project)
 
 ## Who you are working with
-- The owner of this project is **learning to code from zero** (since 2026-10-25). They are a complete beginner and
+- The owner of this project, **Nova**, is **learning to code from zero** (since 2026-10-25). They are a complete beginner and
   want to learn *while* we build, until they can read and write code themselves.
 - They will describe programs they want built. Build them properly, and teach along the way.
 
