@@ -620,6 +620,17 @@ class Workbench:
 
         st = self._load(session)
         clip, states = self._rebuild(st)
+        if get_task(st.task_id).kind == "blocks":
+            from axiom3d.export.gltf import export_mesh_glb
+            from axiom3d.model.blocks import PX, block_mesh
+
+            if clip.blocks is None or not clip.blocks.boxes:
+                raise AxiomError("nothing to export yet: call add_box first")
+            path = export_mesh_glb(*block_mesh(clip.blocks, scale=PX), self.home / "exports" / f"{st.id}.glb",
+                                   name="blocks")
+            return ToolResult(self._finish_text(
+                st, [f"EXPORTED: {path} (glTF 2.0 binary with vertex colours; 16 px = 1 m; Y-up, opens in Blender)"],
+                clip, states))
         if get_task(st.task_id).kind == "vessel":
             from axiom3d.export.gltf import export_mesh_glb
             from axiom3d.model.vessel import display_mesh

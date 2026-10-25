@@ -76,14 +76,18 @@ def world_triangles(skel, state) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _rasterize(tris: np.ndarray, colors: np.ndarray, camera: Camera, size: int, base: np.ndarray,
-               light: np.ndarray = LIGHT) -> np.ndarray:
+               light: np.ndarray = LIGHT, ids: np.ndarray | None = None):
+    """Shaded z-buffer render. With `ids` (one int per triangle), also returns which id each pixel shows (-1 = none)."""
     img = base.astype(float).copy()
     depth = np.full((size, size), np.inf)
+    idbuf = np.full((size, size), -1)
+    want_ids = ids is not None
+    ids = np.full(len(tris), -1) if ids is None else ids
     normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     lengths = np.linalg.norm(normals, axis=1)
     shade = 0.45 + 0.55 * np.abs(normals @ light) / np.where(lengths < 1e-12, 1.0, lengths)
     proj = camera.project(tris.reshape(-1, 3), size).reshape(-1, 3, 3)
-    for (a, b, c), color, s in zip(proj, colors, shade):
+    for (a, b, c), color, s, tid in zip(proj, colors, shade, ids):
         x0, x1 = int(max(0, np.floor(min(a[0], b[0], c[0])))), int(min(size - 1, np.ceil(max(a[0], b[0], c[0]))))
         y0, y1 = int(max(0, np.floor(min(a[1], b[1], c[1])))), int(min(size - 1, np.ceil(max(a[1], b[1], c[1]))))
         if x0 > x1 or y0 > y1 or min(a[2], b[2], c[2]) <= 0:
@@ -103,7 +107,8 @@ def _rasterize(tris: np.ndarray, colors: np.ndarray, camera: Camera, size: int, 
         hit = inside & (z < region)
         region[hit] = z[hit]
         img[y0 : y1 + 1, x0 : x1 + 1][hit] = color * s
-    return img
+        idbuf[y0 : y1 + 1, x0 : x1 + 1][hit] = tid
+    return (img, idbuf) if want_ids else img
 
 
 def _cameras(state) -> list[Camera]:
@@ -214,6 +219,7 @@ def render_footprints(skel, clip, states, size: int = 384) -> Image.Image:
 VESSEL_LIGHT = np.array([-0.4, -0.8, 0.45]) / np.linalg.norm([-0.4, -0.8, 0.45])
 INK = (35, 40, 46)
 FAINT = (150, 156, 162)
+OUTLINE = (128, 134, 142)
 
 
 def _tag(draw: ImageDraw.ImageDraw, xy, text: str, font, fill=INK) -> None:
@@ -322,6 +328,64 @@ def render_vessel_sheet(spec, size: int = 384) -> Image.Image:
         f"{m.mouth_diameter:.3f} | foot D {m.foot_diameter:.3f} | {m.capacity_l:.1f} L | tip {m.tip_angle_deg:.0f} deg"
         "   (D = diameter, r = radius, metres)",
         fill=(60, 60, 60), font=_font(max(10, size // 34)))
+    return sheet
+
+
+def _blocks_view(tris, colors, normals, box_ids, cam: Camera, size: int, title: str, notes: list[str]) -> Image.Image:
+    _, _, forward = cam.basis()
+    keep = normals @ forward < 0  # faces turned toward the camera; hides the touching faces between boxes
+    base = Image.new("RGB", (size, size), BACKGROUND)
+    shaded, ids = _rasterize(tris[keep], colors[keep], cam, size, np.asarray(base), ids=box_ids[keep])
+    # Outline every box where the visible box changes, so same-coloured parts stay apart (no hidden lines).
+    edge = np.zeros(ids.shape, bool)
+    edge[:, 1:] |= ids[:, 1:] != ids[:, :-1]
+    edge[1:, :] |= ids[1:, :] != ids[:-1, :]
+    shaded[edge] = OUTLINE  # mid grey: never mistaken for black paint or any palette colour
+    img = Image.fromarray(shaded.astype(np.uint8))
+    draw = ImageDraw.Draw(img)
+    font = _font(max(10, size // 28))
+    _tag(draw, (6, 4), title, font, fill=(20, 20, 20))
+    for i, note in enumerate(notes):
+        draw.text((6, size - 16 * (len(notes) - i) - 2), note, fill=FAINT, font=font)
+    draw.rectangle([0, 0, size - 1, size - 1], outline=(180, 180, 180))
+    return img
+
+
+def render_blocks_sheet(model, size: int = 320) -> Image.Image:
+    """FRONT, RIGHT SIDE, TOP and a three-quarter view of a block model, each labelled with which side is which."""
+    from axiom3d.model.blocks import FACES, block_mesh, face_size, measure_blocks
+
+    m = measure_blocks(model)
+    mesh, vcol = block_mesh(model)
+    v = mesh.vertices.astype(float)
+    tris = v[mesh.faces]
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    colors = vcol[mesh.faces].mean(axis=1) * 255
+    per_box = [2 * sum(c * r for c, r in (face_size(b, f) for f in FACES)) for b in model.boxes]
+    box_ids = np.repeat(np.arange(len(model.boxes)), per_box)  # block_mesh emits boxes in order
+    c = (np.array(m.low, float) + np.array(m.high, float)) / 2
+    reach = max(m.width, m.depth, m.height, 1)
+    half, far = 0.62 * reach, 4.0 * reach
+    up, back = np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])
+    iso = np.array([1.0, -1.4, 0.9]) / np.linalg.norm([1.0, -1.4, 0.9])
+    views = [
+        (Camera("FRONT (looking at -Y face)", c + [0, -far, 0], c, up, half),
+         ["your left = its RIGHT (-X)", "your right = its LEFT (+X)"]),
+        (Camera("RIGHT SIDE (its -X side)", c + [-far, 0, 0], c, up, half),
+         ["its front (-Y) is on your right"]),
+        (Camera("TOP (looking down)", c + [0, 0, far], c, back, half),
+         ["its back (+Y) at the top, front at the bottom"]),
+        (Camera("3/4 VIEW (front, its left, above)", c + far * iso, c, up, half * 1.1), []),
+    ]
+    sheet = Image.new("RGB", (2 * size, 2 * size + 24), BACKGROUND)
+    for i, (cam, notes) in enumerate(views):
+        sheet.paste(_blocks_view(tris, colors, normals, box_ids, cam, size, cam.title, notes),
+                    ((i % 2) * size, (i // 2) * size))
+    ImageDraw.Draw(sheet).text(
+        (8, 2 * size + 5),
+        f"width {m.width} px (x {m.low[0]}..{m.high[0]}) | depth {m.depth} (y {m.low[1]}..{m.high[1]}) | "
+        f"height {m.height} (z {m.low[2]}..{m.high[2]}) | {len(model.boxes)} boxes | faces -Y, its left is +X",
+        fill=(60, 60, 60), font=_font(max(10, size // 30)))
     return sheet
 
 
