@@ -1,7 +1,7 @@
 # Haiku vase test: axiom3d with and without the protocol, and no tool
 
 Date: 2026-10-25. Tool version: commit `e32f38f` (branch `v2-work`).
-Task: `meiping_vase`, a Ming plum vase as a lathe profile (red body, blue band at the foot, blue rim), 10 acceptance criteria.
+Task: `meiping_vase`, a Ming plum vase as a lathe profile (red body, blue band at the foot, blue rim), 10 acceptance criteria at the time of the runs (11 after the fix below).
 Model: the `haiku` agent alias (assumed Haiku 5.5), effort **high**, one run per arm, a 60-tool-call budget each.
 
 ## Arms
@@ -55,6 +55,31 @@ The prompts forbade reading anything outside the run's own tool or folder. This 
 4. **The protocol cost almost nothing here.** 14 calls, the same as bare. Quiz passed on the first attempt; 11 of 12 predictions were right.
 5. **The raw arm's self-check was honest.** Its own measurements matched the grader to within 1 mm, and its mesh is closed with outward normals.
 
+## The hourglass: a vase the tool should not have certified
+
+Looking at the vases in 3D, the protocol run's lower body pinches into a stem. The waist positions explain it:
+
+| | waist height | inside the blue foot band? | pinch per side |
+|---|---|---|---|
+| reference | 0.100 H | at its edge | 6 mm |
+| **protocol** | **0.175 H** | **no, 2 cm above it** | 14 mm |
+| bare | 0.075 H | yes | 12 mm |
+| raw | 0.125 H | yes | 8 mm |
+
+The task text says the waist sits "just above the foot", but none of the 10 criteria measured where the waist is, only that the foot is 5 mm wider than it. The protocol run never called `observe`; every gate it passed was numeric. So the tool certified a vase that looks wrong. The mesh is not at fault: all four vases are identical and correct seen from below.
+
+**Fix (commit `822f6f1`):** the tool measures `vessel.waist_height` (report, calc, predictions), and the meiping task gains an 11th criterion: the waist sits in the lowest 15% of the height. Graded on 11 criteria, the first protocol vase scores 10/11 and could not be certified; the reference, bare and raw vases still pass. The workflow text now says to look at the sheet before `finish`.
+
+**Re-run on the fixed tool** (same prompt, new folder, one run):
+
+| | criteria | certified | tool calls | tokens | time | predictions | finish attempts | waist |
+|---|---|---|---|---|---|---|---|---|
+| protocol, after the fix | **11/11** | yes | 14 | 71k | 60 s | 10/10 | 1 | 0.100 H, inside the band (0-0.07 m) |
+
+It read the hourglass warning in the guide, called `observe(views=['sheet'])` and opened the image (the only file read, which the rules allow), then finished on the first attempt. Its pinch is 15 mm per side, but it sits inside the blue band and reads as a foot flare.
+
+The 15% limit was set after seeing these five vases: it passes the four that look right and fails the one that does not. One good re-run is evidence that the fix works, not proof.
+
 ## Friction found in the tool (fixed after this run)
 
 | # | what happened | evidence | fix |
@@ -64,9 +89,11 @@ The prompts forbade reading anything outside the run's own tool or folder. This 
 | F3 | band ends were undocumented; Haiku guessed "exclusive" | protocol's discrepancy | docs say both ends are included and the later band wins |
 | F4 | first `finish` sent claims as one prose string (one wasted call; also seen in v1) | protocol's first `finish` | start text shows a claims example |
 
+All four are fixed in commit `822f6f1`, with a test each in `tests/test_vessel_task.py`.
+
 ## Limits
 
-- One run per arm. Another run could differ.
+- One run per arm, plus one re-run of the protocol arm. Another run could differ.
 - The criteria check proportions and colour zones, not beauty, and not the dragon.
 - The `haiku` alias is assumed to be Haiku 5.5.
 - Token and time counts come from the harness and include each run reading its own tool output.
