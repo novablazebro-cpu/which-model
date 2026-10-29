@@ -1,0 +1,101 @@
+"""Evaluate a clip at a frame: keys, then foot constraints solved live with IK."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from axiom3d.anim.clip import Clip
+from axiom3d.rig.ik import LegIKResult, solve_leg
+from axiom3d.rig.skeleton import forward_kinematics
+
+LEG_JOINTS = ("hip", "knee", "ankle")
+
+
+@dataclass
+class FrameState:
+    frame: int
+    root_position: np.ndarray
+    heading_deg: float
+    rotations: dict[str, np.ndarray]
+    joint_world: dict[str, tuple[np.ndarray, np.ndarray]]
+    points: dict[str, np.ndarray]
+    angles: dict[str, float]
+    leg_modes: dict[str, str]
+    ik: dict[str, LegIKResult | None]
+    notes: list[str] = field(default_factory=list)
+
+
+def _plant_yaw(skel, clip: Clip, plant) -> float:
+    """A plant's foot heading: explicit `facing`, else the root heading when the plant starts (resolved live)."""
+    if plant.yaw_deg is not None:
+        return plant.yaw_deg
+    return clip.root_at(plant.start, skel.dims["pelvis_height"])[1]
+
+
+def _leg_target(skel, clip: Clip, side: str, frame: int, notes: list[str]):
+    """(mode, ankle target or None, foot yaw or None)."""
+    ankle_h = skel.dims["ankle_height"]
+    for p in clip.plants:
+        if p.side == side and p.start <= frame <= p.end:
+            return "plant", np.array([*p.xy, ankle_h]), _plant_yaw(skel, clip, p)
+    for s in clip.swings:
+        if s.side == side and s.start <= frame <= s.end:
+            before = [p for p in clip.plants if p.side == side and p.end <= s.start]
+            after = [p for p in clip.plants if p.side == side and p.start >= s.end]
+            if not before or not after:
+                missing, which = ("before", "starts") if not before else ("after", "ends")
+                notes.append(f"{side} swing {s.start}-{s.end} has no plant {missing}; the leg follows keys "
+                             f"until you add the plant that {which} the swing")
+                return "keys", None, None
+            pa, pb = max(before, key=lambda p: p.end), min(after, key=lambda p: p.start)
+            t = (frame - s.start) / (s.end - s.start)
+            xy = np.asarray(pa.xy) + t * (np.asarray(pb.xy) - np.asarray(pa.xy))
+            ya, yb = _plant_yaw(skel, clip, pa), _plant_yaw(skel, clip, pb)
+            return "swing", np.array([*xy, ankle_h + s.apex_m * 4 * t * (1 - t)]), ya + t * (yb - ya)
+    return "keys", None, None
+
+
+def evaluate_frame(skel, clip: Clip, frame: int) -> FrameState:
+    position, heading = clip.root_at(frame, skel.dims["pelvis_height"])
+    keyed = clip.keyed_channels()
+    # Keyed angles are reported exactly as keyed; only IK-driven joints are decomposed back to angles.
+    angles = {ch: clip.channel_at(ch, frame) for ch in skel.channels()}
+    rotations = {
+        name: skel.angles_to_quat(name, {d.name: angles[f"{name}.{d.name}"] for d in joint.dofs})
+        for name, joint in skel.joints.items()
+    }
+    notes: list[str] = []
+    modes: dict[str, str] = {}
+    iks: dict[str, LegIKResult | None] = {}
+    for side in ("left", "right"):
+        mode, target, yaw = _leg_target(skel, clip, side, frame, notes)
+        modes[side], iks[side] = mode, None
+        if target is None:
+            continue
+        ik = solve_leg(skel, side, position, heading, target, yaw)
+        iks[side] = ik
+        rotations[f"{side}_hip"] = ik.hip_local
+        rotations[f"{side}_knee"] = skel.angles_to_quat(f"{side}_knee", {"flexion": ik.knee_flexion_deg})
+        rotations[f"{side}_ankle"] = skel.angles_to_quat(f"{side}_ankle", {"dorsiflexion": ik.ankle_dorsiflexion_deg})
+        for joint in LEG_JOINTS:
+            for d in skel.joints[f"{side}_{joint}"].dofs:
+                channel = f"{side}_{joint}.{d.name}"
+                if channel in keyed:
+                    notes.append(f"{channel} keys ignored at frame {frame}: {side} leg is driven by {mode}")
+    joint_world, points = forward_kinematics(skel, position, heading, rotations)
+    for name, p in points.items():
+        if not np.all(np.isfinite(p)):
+            raise RuntimeError(f"non-finite position for {name} at frame {frame}")
+    for side, ik in iks.items():
+        if ik is not None:
+            for joint in LEG_JOINTS:
+                name = f"{side}_{joint}"
+                angles.update({f"{name}.{dof}": v for dof, v in skel.quat_to_angles(name, rotations[name]).items()})
+    return FrameState(frame, position, heading, rotations, joint_world, points, angles, modes, iks, notes)
+
+
+def evaluate_clip(skel, clip: Clip) -> list[FrameState]:
+    tl = clip.timeline
+    return [evaluate_frame(skel, clip, f) for f in range(tl.start, tl.end + 1)]
