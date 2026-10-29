@@ -58,3 +58,14 @@ Every professional term we use, in plain words. New terms are added as they come
 | **containment** | A guarantee that a program only touches the places it is allowed to. | Every tool writes only under `--home`, and tests prove it. |
 | **environment variable** | A named setting that lives outside a program and is read by it. | `AXIOM3D_HOME` sets the default home. |
 | **mutation check** | Deliberately breaking the code to confirm a test fails. A test that can't fail proves nothing. | Removing the hook's `core.hooksPath` line made `test_dev_hook_survives_a_global_hooks_path` go red. |
+
+## Files, folders and paths
+| term | plain meaning | in this project |
+|---|---|---|
+| **path** | The address of a file or folder: the folders you pass through to reach it, separated by `/`. | `/home/user/which-model/README.md` |
+| **absolute path** | An address that starts at the very top (`/`), so it means the same thing from anywhere. Like a full street address with country. | `claude mcp add ... --home /home/you/.axiom3d-ai` |
+| **relative path** | An address that starts from where you are standing now. Like "the second door on the left". | `./home`, `.axiom3d` |
+| **current working directory (cwd)** | The folder a program considers itself to be standing in right now. Relative paths start here. | Running `axiom3d call ...` inside `which-model` makes `./home` mean `which-model/home`. |
+| **`.` and `..`** | `.` means "this folder". `..` means "the folder that contains this one" (one step up). | `../../evil` climbs two folders up. That is how path traversal works. |
+| **`~` (tilde)** | Shortcut for your personal home folder. Only a shell or the program expands it. | `~/.axiom3d-ai` becomes `/home/you/.axiom3d-ai`. |
+| **hidden file / folder** | A name starting with a dot. Tools hide it from normal listings to cut clutter. It is not secret. | `.git`, `.axiom3d`, `.axiom3d-ai` |
