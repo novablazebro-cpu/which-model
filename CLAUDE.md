@@ -29,5 +29,7 @@
 - Work happens on branch `v2-work`, pushed to `claude/vigilant-goodall-y4x0bf`. No pull request yet.
 - Designs: `docs/superpowers/specs/`. Plans: `docs/superpowers/plans/`. Test reports with Haiku:
   `docs/eval/`. A dragon modelled in code: `examples/storm-dragon/`.
-- Run the tests: `uv run pytest -q` (all green as of 2026-10-25).
+- Run the tests: `uv run pytest -q` (392 green as of 2026-10-29).
+- AI safety rails (added 2026-10-29): `axiom3d workspace init|dev`, a stderr warning when `--home` is inside a git repo,
+  `tests/test_containment.py`. How-to and the manual GitHub branch-protection step: `docs/ai-workspace.md`.
 - Learning notes for the owner: `docs/learn/`.

@@ -4,8 +4,9 @@
 human's eyes and hands. axiom3d is designed around the ways AI models fail at 3D,
 and it is aimed squarely at the cheap and fast ones.
 
-v1 is a working slice: a humanoid mannequin, walking and stepping tasks, exposed
-as an MCP server (13 tools) and a CLI.
+It has three kinds of model: a walking mannequin, vessels (a vase spun around an
+axis) and block models (a Minecraft creeper). Models drive it through an MCP server
+(20 tools) or a CLI.
 
 ## Why
 
@@ -82,19 +83,29 @@ uvx --from git+https://github.com/novablazebro-cpu/which-model axiom3d tasks
 
 ## Connect a model (MCP)
 
-Use a fixed `--home` so sessions don't land in whatever directory the client starts in.
+First make a dedicated folder for the AI's models. It refuses to sit inside a git
+repository, so the AI's files can never end up in your commits:
+
+```bash
+axiom3d workspace init          # makes ~/.axiom3d-ai and prints the exact line to connect
+```
+
+Use that fixed `--home` so sessions don't land in whatever directory the client starts in.
 Each server works only on the session it started, so several clients can share one home.
+If `--home` is inside a git repository, axiom3d prints a warning on stderr.
+Details, the dev-clone workflow and the one GitHub setting to change by hand:
+[`docs/ai-workspace.md`](docs/ai-workspace.md).
 
 **Claude Code**
 ```bash
-claude mcp add axiom3d -- axiom3d serve --home ~/.axiom3d
+claude mcp add axiom3d -- axiom3d serve --home ~/.axiom3d-ai
 ```
 
 **Gemini CLI / Antigravity / other MCP clients**: add this to the client's MCP server config:
 ```json
 {
   "mcpServers": {
-    "axiom3d": { "command": "axiom3d", "args": ["serve", "--home", "~/.axiom3d"] }
+    "axiom3d": { "command": "axiom3d", "args": ["serve", "--home", "~/.axiom3d-ai"] }
   }
 }
 ```
@@ -118,8 +129,8 @@ axiom3d call finish --json '{"claims": ["left_ankle.forward@24 ~= 0.36 ± 0.02",
 axiom3d call export        # .glb file; Blender opens it
 ```
 
-Quiz answers are seeded per session, so read your own quiz. `guide` has four
-topics: `conventions`, `walking`, `predictions` and `tools`.
+Quiz answers are seeded per session, so read your own quiz. `guide` has seven
+topics: `conventions`, `walking`, `vessels`, `blocks`, `predictions`, `calculator` and `tools`.
 
 This short sequence is deliberately incomplete. `finish` answers **NOT CERTIFIED**
 because the unplanted left foot sinks 4 cm into the ground once the pelvis
@@ -135,7 +146,11 @@ lowers, and `check` says so. A full solution for each task is in
 | `guide(topic)` | teaching material |
 | `observe(frames, views)` | report, timeline, sheet, filmstrip, footprints |
 | `check()` | every failed check, with a hint |
-| `set_root`, `set_pose`, `plant_foot`, `swing_foot` | edits; each takes `expect=[...]` |
+| `calc(expr)` | exact math on the scene; never changes it |
+| `set_root`, `set_pose`, `plant_foot`, `swing_foot` | mannequin edits; each takes `expect=[...]` |
+| `shape_profile`, `paint_band` | vessel edits |
+| `add_box`, `remove_box`, `paint_face` | block-model edits |
+| `batch(edits)` | several edits under one set of predictions; one undo reverts them all |
 | `undo()`, `accept_discrepancy(reason)` | recovery after a failed prediction |
 | `finish(claims)` | the exit exam; certifies or explains what's missing |
 | `export()` | glTF 2.0 `.glb` (validated with the Khronos validator) |
@@ -153,7 +168,7 @@ Every session writes a ledger: quiz attempts, predictions made versus correct
 (the **calibration score**), discrepancies, rejected edits and the exam outcome.
 
 ```bash
-axiom3d eval report --home ~/.axiom3d
+axiom3d eval report --home ~/.axiom3d-ai
 ```
 
 The bundled scripted agents (`axiom3d.eval.agents`) prove that the checks and gates work:
@@ -195,6 +210,9 @@ tool's checks and not on the model's predictions.
 uv sync
 uv run pytest
 ```
+
+To let an AI change this code, give it its own clone that cannot push to `main`:
+`axiom3d workspace dev <name>` (see [`docs/ai-workspace.md`](docs/ai-workspace.md)).
 
 Design spec: [`docs/superpowers/specs/2026-10-24-axiom3d-design.md`](docs/superpowers/specs/2026-10-24-axiom3d-design.md).
 Implementation plan: [`docs/superpowers/plans/2026-10-24-axiom3d-v1.md`](docs/superpowers/plans/2026-10-24-axiom3d-v1.md).

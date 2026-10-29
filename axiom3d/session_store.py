@@ -85,9 +85,13 @@ def load(session_id: str, home: Path) -> SessionState:
         raise FileNotFoundError(f"unknown session {session_id!r}; call start_session to begin one")
     try:
         data = json.loads(_path(home, session_id).read_text())
-        return SessionState(**_migrate(data))
+        state = SessionState(**_migrate(data))
     except (json.JSONDecodeError, UnicodeDecodeError, TypeError, KeyError, AttributeError) as e:
         raise ValueError(f"unreadable session {session_id!r} ({type(e).__name__}); call start_session to begin a new one") from None
+    if state.id != session_id:  # the id names files (exports/<id>.glb), so a file may not claim another one
+        raise ValueError(f"unreadable session {session_id!r} (the file names itself {state.id!r}); "
+                         "call start_session to begin a new one")
+    return state
 
 
 def _migrate(data: dict) -> dict:
@@ -104,7 +108,10 @@ def _migrate(data: dict) -> dict:
 
 def current_id(home: Path) -> str | None:
     path = Path(home) / "current"
-    return path.read_text().strip() if path.exists() else None
+    if not path.exists():
+        return None
+    sid = path.read_text().strip()
+    return sid if _ID.fullmatch(sid) else None  # a tampered pointer must not become part of a file path
 
 
 def rebuild(state: SessionState, skel):
