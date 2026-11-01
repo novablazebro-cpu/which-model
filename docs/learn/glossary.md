@@ -28,6 +28,12 @@ Every professional term we use, in plain words. New terms are added as they come
 | **refactor** | Reorganising code without changing what it does, to make it cleaner. | Replacing scattered `if vessel` checks with one per-kind table. |
 | **spec (specification)** | A written description of what a program must do, before building it. | `docs/superpowers/specs/`. |
 | **plan** | The step-by-step build order for a spec. | `docs/superpowers/plans/`. |
+| **crash vs logic bug** | A crash stops the program with an error. A logic bug runs fine but gives a wrong answer, so it is harder to spot and usually worse. | 2026-11-01 bug hunt: the duplicate-claims loophole is a logic bug. |
+| **fuzzing** | Throwing hundreds of strange inputs (empty, huge, wrong type, NaN) at a program to see what breaks. Like a crash-test dummy for code. | Found 20 crash paths in `axiom3d/api.py`, all from wrongly-typed input. |
+| **edge case** | An unusual input at the extreme end of what is allowed: zero, empty, the largest value. | `observe(frames=NaN)`. |
+| **NaN (Not a Number)** | A special number value meaning "undefined", e.g. 0/0. Any comparison with it is false. | The tool uses NaN on purpose for "no box yet"; a NaN frame crashes `observe`. |
+| **loophole** | A way to satisfy a rule's wording without its purpose. | `finish` accepts the same claim twice as "2 claims". |
+| **docstring** | The text right under a function's name that describes it. In MCP it becomes the tool description the AI model reads. | `axiom3d/mcp_server.py`: `start_session` doesn't mention the creeper task. |
 
 ## How programs talk
 | term | plain meaning | in this project |
