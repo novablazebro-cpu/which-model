@@ -16,6 +16,8 @@ Every professional term we use, in plain words. New terms are added as they come
 | **pull request (PR)** | A request to merge your branch into main. Others review the changes, comment, ask for fixes, then approve. | None yet; you decide when to open one. |
 | **merge** | Combining one branch's changes into another. | Happens when a PR is approved. |
 | **worktree** | A second working folder for the same repo, so two branches can be open at once. | The code sits in `.worktrees/v2`. |
+| **rebase** | Moving your commits so they sit on top of newer ones, as if you had started from there. `git rebase --abort` undoes a rebase that goes wrong. | 2026-11-01: aborted, because it tried to replay old phone commits too. |
+| **cherry-pick** | Copying one specific commit onto another branch, leaving everything else behind. | 2026-11-01: moved only the glossary commit from `main` onto the work branch. |
 
 ## Writing code safely
 | term | plain meaning | in this project |
