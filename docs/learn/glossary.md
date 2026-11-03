@@ -44,3 +44,20 @@ Every professional term we use, in plain words. New terms are added as they come
 | **vertex** | A corner point of those triangles. | The dragon has about 70,000 triangles. |
 | **normal** | The direction a surface faces; lighting uses it. | Wrong normals caused the vase's dark smear. |
 | **GLB / glTF** | A standard 3D file format that Blender and browsers open. | `storm_dragon.glb`. |
+
+## Minecraft servers (the Knell plugin plan, 2026-11-03)
+| term | plain meaning | in this project |
+|---|---|---|
+| **chunk** | A 16 × 16 block column of a Minecraft world; the piece the game loads and generates one at a time. | The Knell's site is 12 × 12 chunks (192 × 192 blocks). |
+| **biome** | A region with its own blocks, plants, colours and mobs. Its natural size comes from random noise, not a fixed number. | Tollmoor (surface) and Knell Hollow (underground). |
+| **Paper** | The server software that runs your Minecraft server, with extra tools for plugin makers. | Paper 26.3, which needs Java 25. |
+| **plugin** | Java code the server runs, adding behaviour: mobs, items, commands. | The Knell plugin: stamping the site, the boss, the mimic. |
+| **datapack** | A folder of settings files Minecraft reads at startup: biomes, loot tables, recipes. | Packed inside the plugin, so you still install one file. |
+| **tick** | One twentieth of a second, the server's heartbeat. | The stamper works a few chunks per tick so the server never freezes. |
+| **seed** | A number that makes "random" choices repeatable: the same seed always gives the same result. | The same seed always digs the same caves. |
+| **block display entity** | A floating block the server can move, turn and resize every tick. | About 100 of them make up the Knell's body. |
+| **mannequin** | An entity shaped like a player that can wear a real player's skin. | The fake teammate at the end of a tunnel. |
+| **loot table** | A file listing what a chest can contain and how likely each item is. | Common, rare, epic and boss-hoard chests. |
+| **resource pack** | A download that changes textures and sounds on players' screens. | Needed later for custom item looks and the music disc. |
+| **state machine** | A program that is always in exactly one state and has rules for moving between them. | The Knell's brain: asleep, waking, hunting, listening, mimicking, attacking, killed. |
+| **Gradle** | A build tool: downloads the libraries a project needs and builds the final file. | Builds the plugin's `.jar`. |
