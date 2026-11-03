@@ -67,3 +67,8 @@ Every professional term we use, in plain words. New terms are added as they come
 | **item model** | A resource-pack model shown on an item or a floating display, used to fake custom blocks. | The 13 assets in the brief for Gemini, e.g. `knell:great_bell`. |
 | **flood fill** | Spreading out step by step from a start point to everything you can reach, like water filling rooms. | The test proving you can walk from the arrival chamber to the pit. |
 | **mutation check** | Breaking the code on purpose to confirm a test notices. A test that stays green proves nothing. | Turning the tunnels off made the flood-fill test fail, as it should. |
+| **state machine** (in practice) | The Knell's brain is always in one state (asleep, waking, hunting, listening, attacking, mimicking, returning) with rules for switching. | `core/.../brain/KnellBrain.java` in the Knell repo. |
+| **inverse kinematics (IK)** | Working backwards from where a foot must go to how the hip and knee must bend. | `solveIK` in `KnellRig.java`: two bones per leg. |
+| **pathfinding** | Finding a walkable route around walls and up steps. The Knell uses Minecraft's own pathfinder through an invisible host mob. | `KnellBoss.java`; the test uses a breadth-first search. |
+| **simulation test** | Running the real code on a fake world to see the whole thing work together, when the real world is not available. | `HuntSimulationTest`: it found the pit had no way out. |
+| **source path compile** | Compiling against a library's source code instead of its packaged jar, so the compiler still checks every call. | The plugin, while repo.papermc.io was blocked. |
