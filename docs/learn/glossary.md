@@ -61,3 +61,9 @@ Every professional term we use, in plain words. New terms are added as they come
 | **resource pack** | A download that changes textures and sounds on players' screens. | Needed later for custom item looks and the music disc. |
 | **state machine** | A program that is always in exactly one state and has rules for moving between them. | The Knell's brain: asleep, waking, hunting, listening, mimicking, attacking, killed. |
 | **Gradle** | A build tool: downloads the libraries a project needs and builds the final file. | Builds the plugin's `.jar`. |
+| **dimension** | A whole separate world with its own rules for sky, light and terrain, like the Nether or the End. | The Knell's world: 30 × 30 chunks of rock with the Hollow inside. |
+| **world border** | An invisible wall that sets how big a world can be. | 480 × 480 blocks around the Knell's dimension. |
+| **noise** | Smooth randomness: nearby points get similar values. Makes cave walls look natural instead of perfectly round. | `Noise3.java` in the Knell repo. |
+| **item model** | A resource-pack model shown on an item or a floating display, used to fake custom blocks. | The 13 assets in the brief for Gemini, e.g. `knell:great_bell`. |
+| **flood fill** | Spreading out step by step from a start point to everything you can reach, like water filling rooms. | The test proving you can walk from the arrival chamber to the pit. |
+| **mutation check** | Breaking the code on purpose to confirm a test notices. A test that stays green proves nothing. | Turning the tunnels off made the flood-fill test fail, as it should. |
